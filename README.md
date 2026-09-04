@@ -160,6 +160,34 @@ controls, expected biology, and downstream analysis.
 These plots come from a published healthy-volunteer skin microbiome study:
 [Scientific Reports (2026)](https://www.nature.com/articles/s41598-026-62903-7#Sec17).
 
+### QC overview
+
+![HV decontam QC overview](man/figures/hv_qc_overview.png)
+
+The package plots can be combined into one figure with `patchwork`:
+
+```r
+library(patchwork)
+library(ggplot2)
+
+p_threshold <- qc$plots$threshold_sensitivity
+p_flagged <- qc$plots$flagged_taxa_reads_by_threshold[["0.1"]]
+p_taxa <- qc$plots$taxa_reads_before_after_by_threshold[["0.1"]] +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  )
+
+qc_figure <-
+  (p_threshold | p_flagged) /
+  p_taxa +
+  plot_layout(heights = c(1, 1.15), guides = "collect") +
+  plot_annotation(tag_levels = "A") &
+  theme(legend.position = "bottom")
+
+qc_figure
+```
+
 ### Threshold sensitivity
 
 ![Threshold-specific read and feature retention](man/figures/hv_threshold_sensitivity.png)
