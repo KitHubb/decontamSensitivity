@@ -13,8 +13,8 @@ signal is depleted? It reports:
 - read retention in biological samples, negative controls, and all samples;
 - feature retention using group-specific observed-feature denominators;
 - retained and zero-read samples at each threshold;
-- features and taxa newly flagged between thresholds; and
-- the biological-sample abundance of newly flagged taxa.
+- flagged features and taxa at each threshold; and
+- taxon read counts before and after filtering at each threshold.
 
 It is a sensitivity diagnostic, not an automatic threshold optimizer.
 
@@ -74,9 +74,8 @@ citation("decontam")
 
 ## One-call phyloseq workflow
 
-For an existing phyloseq object, one call runs the complete QC workflow. The
-selected threshold is always supplied by the analyst; the package does not
-optimize it automatically.
+For an existing phyloseq object, one call runs the complete QC workflow for
+every supplied threshold. The package does not select an optimal threshold.
 
 ```r
 qc <- run_decontam_qc(
@@ -84,9 +83,7 @@ qc <- run_decontam_qc(
   control_column = "T_C",
   control_label = "Ctrl",
   thresholds = seq(0.1, 0.5, 0.1),
-  selected_threshold = 0.1,
   batch = "SequencingRun",
-  plot_all_thresholds = TRUE,
   progress = TRUE
 )
 
@@ -95,16 +92,12 @@ qc$tables$library_size_summary
 qc$tables$prevalence_comparison
 qc$tables$prevalence_enrichment
 qc$tables$flagged_taxa
-qc$tables$newly_flagged_taxa
-
 qc$plots$sample_retention
 qc$plots$prevalence_enrichment
-qc$plots$flagged_taxa_reads
-qc$plots$taxa_reads_before_after
 qc$plots$flagged_taxa_reads_by_threshold[["0.5"]]
 qc$plots$taxa_reads_before_after_by_threshold[["0.5"]]
 
-ps_filtered <- qc$filtered_phyloseq
+ps_filtered <- qc$filtered_phyloseq_by_threshold[["0.5"]]
 ```
 
 `progress` defaults to `interactive()`: it is shown automatically in an
@@ -164,12 +157,6 @@ plot_threshold_sensitivity(result)
 plot_decontam_scores(result)
 
 summarize_flagged_taxa(result, threshold = 0.1, taxonomy = "Genus")
-compare_newly_flagged_taxa(
-  result,
-  threshold_low = 0.1,
-  threshold_high = 0.4,
-  taxonomy = "Genus"
-)
 ```
 
 See [`examples/published_skin_microbiome_example.R`](examples/published_skin_microbiome_example.R)
@@ -177,16 +164,15 @@ for the schema used by the published workflow.
 
 The DT Swab dataset can be evaluated directly with the package using
 [`examples/DT_swab_threshold_sensitivity.Rmd`](examples/DT_swab_threshold_sensitivity.Rmd).
-This report restores the five negative-control labels from the study metadata,
-runs thresholds 0.1--0.9, summarizes newly flagged taxa, and validates the
-threshold 0.5 result against the previously saved v4 phyloseq object.
+This report restores the five negative-control labels from the study metadata
+and runs the complete QC output for thresholds 0.1--0.9.
 
 ## Interpretation
 
 A threshold can be considered conservative when negative-control reads are
 substantially depleted while biological reads and biologically plausible taxa
-remain stable. Inspect newly flagged taxa whenever a higher threshold causes a
-large loss. Beta-diversity separation between biological samples and controls
+remain stable. Compare the threshold-specific retention tables and plots when
+a higher threshold causes a large loss. Beta-diversity separation between biological samples and controls
 is deliberately not used as an optimization criterion because the prevalence
 model already uses control status.
 

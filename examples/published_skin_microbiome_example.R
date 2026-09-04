@@ -18,6 +18,3 @@ library(decontamSensitivity)
 # plot_threshold_sensitivity(result)
 # plot_decontam_scores(result)
 # summarize_flagged_taxa(result, threshold = 0.1, taxonomy = "Genus")
-# compare_newly_flagged_taxa(
-#   result, threshold_low = 0.1, threshold_high = 0.2, taxonomy = "Species"
-# )

@@ -9,8 +9,6 @@ run_decontam_qc(
   control_column,
   control_label,
   thresholds = seq(0.1, 0.5, 0.1),
-  selected_threshold,
-  comparison_threshold_low = NULL,
   taxonomy = "Genus",
   batch = NULL,
   batch_combine = c("minimum", "product", "fisher"),
@@ -18,7 +16,6 @@ run_decontam_qc(
   top_n_flagged = 20L,
   top_n_composition = 15L,
   prevalence_pseudocount = 0.5,
-  plot_all_thresholds = FALSE,
   progress = interactive()
 )
 }
@@ -31,13 +28,6 @@ run_decontam_qc(
 
 \item{thresholds}{Numeric thresholds to evaluate.}
 
-\item{selected_threshold}{Prespecified threshold used for taxonomic summaries
-and the filtered phyloseq object. It must occur in \code{thresholds}.}
-
-\item{comparison_threshold_low}{Optional lower threshold for the newly flagged
-taxa table. If \code{NULL}, the nearest evaluated threshold below
-\code{selected_threshold} is used when available.}
-
 \item{taxonomy}{Taxonomic rank used in summaries and plots.}
 
 \item{batch}{Optional sample-data column used as the \code{decontam} batch.}
@@ -46,30 +36,26 @@ taxa table. If \code{NULL}, the nearest evaluated threshold below
 
 \item{normalize}{Passed to \code{\link[decontam:isContaminant]{decontam::isContaminant()}}.}
 
-\item{top_n_flagged}{Maximum flagged taxa shown in the read-count plot.}
+\item{top_n_flagged}{Maximum flagged taxa shown in each read-count plot.}
 
-\item{top_n_composition}{Number of taxa shown individually in the before/after
-composition plot.}
+\item{top_n_composition}{Number of taxa shown individually in each
+before/after composition plot.}
 
 \item{prevalence_pseudocount}{Correction used in prevalence enrichment ratios.}
 
-\item{plot_all_thresholds}{Logical; when \code{TRUE}, also create named lists of
-flagged-taxa and before/after composition plots for every evaluated
-threshold. The selected-threshold plots are always returned separately.}
-
-\item{progress}{Logical; display a \code{cli} progress bar. The default is \code{TRUE}
-in interactive sessions and \code{FALSE} during non-interactive execution such
-as R Markdown rendering and automated tests.}
+\item{progress}{Logical; display one updating \code{cli} progress bar. The default
+is \code{TRUE} in interactive sessions and \code{FALSE} during non-interactive
+execution such as R Markdown rendering and automated tests.}
 }
 \value{
-An object of class \code{decontam_qc} with \code{result}, \code{filtered_phyloseq},
-\code{group_phyloseq}, \code{tables}, and \code{plots} components.
+An object of class \code{decontam_qc} containing results, a named list of
+filtered phyloseq objects, summary tables, and threshold-specific plots.
 }
 \description{
 One-call interface for a phyloseq object. It calculates prevalence scores,
-evaluates all thresholds, filters at a prespecified threshold, summarizes
-library size and control-versus-biological prevalence, and prepares the core
-QC plots. The function does not select an optimal threshold.
+evaluates every supplied threshold, filters the object at every threshold,
+summarizes QC metrics, and prepares threshold-specific plots. The function
+does not select or compare a preferred threshold.
 }
 \examples{
 \dontrun{
@@ -78,11 +64,9 @@ qc <- run_decontam_qc(
   control_column = "control_status",
   control_label = "control",
   thresholds = seq(0.1, 0.9, 0.1),
-  selected_threshold = 0.5,
-  plot_all_thresholds = TRUE,
   progress = TRUE
 )
 qc$plots$sample_retention
-qc$plots$taxa_reads_before_after
+qc$plots$taxa_reads_before_after_by_threshold[["0.5"]]
 }
 }

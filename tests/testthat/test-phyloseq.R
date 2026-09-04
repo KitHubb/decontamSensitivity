@@ -133,29 +133,30 @@ test_that("one-call QC returns tables, plots, and filtered data", {
     ps,
     control_column = "type",
     control_label = "control",
-    thresholds = c(0.1, 0.2, 0.5),
-    selected_threshold = 0.5
+    thresholds = c(0.1, 0.2, 0.5)
   ))
   expect_s3_class(qc, "decontam_qc")
   expect_s3_class(qc$result, "decontam_sensitivity")
-  expect_s4_class(qc$filtered_phyloseq, "phyloseq")
+  expect_equal(qc$thresholds, c(0.1, 0.2, 0.5))
+  expect_named(qc$filtered_phyloseq_by_threshold, c("0.1", "0.2", "0.5"))
+  expect_true(all(vapply(qc$filtered_phyloseq_by_threshold,
+                         methods::is, logical(1), class2 = "phyloseq")))
   expect_named(qc$plots, c(
     "score_distribution", "threshold_sensitivity", "sample_retention",
-    "prevalence_enrichment", "flagged_taxa_reads",
-    "taxa_reads_before_after", "flagged_taxa_reads_by_threshold",
+    "prevalence_enrichment", "flagged_taxa_reads_by_threshold",
     "taxa_reads_before_after_by_threshold"
   ))
-  expect_null(qc$plots$flagged_taxa_reads_by_threshold)
-  expect_null(qc$plots$taxa_reads_before_after_by_threshold)
   expect_named(qc$tables, c(
     "threshold_summary", "read_retention", "feature_retention",
     "sample_retention", "sample_retention_summary", "library_size_summary",
-    "prevalence_comparison", "prevalence_enrichment", "flagged_features", "flagged_taxa",
-    "newly_flagged_taxa", "newly_flagged_intervals"
+    "prevalence_comparison", "prevalence_enrichment", "flagged_features", "flagged_taxa"
   ))
+  expect_true(all(qc$tables$flagged_features$threshold %in% qc$thresholds))
+  expect_false(any(c("selected_threshold", "comparison_threshold_low",
+                     "plot_all_thresholds") %in% names(formals(run_decontam_qc))))
 })
 
-test_that("one-call QC can create taxa plots for every threshold", {
+test_that("one-call QC creates taxa plots for every threshold", {
   skip_if_not_installed("phyloseq")
   skip_if_not_installed("decontam")
   ps <- make_toy_ps()
@@ -163,9 +164,7 @@ test_that("one-call QC can create taxa plots for every threshold", {
     ps,
     control_column = "type",
     control_label = "control",
-    thresholds = c(0.1, 0.2, 0.5),
-    selected_threshold = 0.5,
-    plot_all_thresholds = TRUE
+    thresholds = c(0.1, 0.2, 0.5)
   ))
 
   expect_named(
@@ -180,10 +179,6 @@ test_that("one-call QC can create taxa plots for every threshold", {
     qc$plots$taxa_reads_before_after_by_threshold,
     inherits, logical(1), what = "ggplot"
   )))
-  expect_identical(
-    qc$plots$taxa_reads_before_after,
-    qc$plots$taxa_reads_before_after_by_threshold[["0.5"]]
-  )
 })
 
 test_that("one-call QC validates the progress option", {
@@ -196,7 +191,6 @@ test_that("one-call QC validates the progress option", {
       control_column = "type",
       control_label = "control",
       thresholds = c(0.1, 0.5),
-      selected_threshold = 0.5,
       progress = NA
     ),
     "`progress` must be `TRUE` or `FALSE`",

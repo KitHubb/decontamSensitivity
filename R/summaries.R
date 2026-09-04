@@ -114,81 +114,9 @@ summarize_flagged_taxa <- function(result, threshold, taxonomy = "Genus") {
   .aggregate_taxa(result, ids, taxa)
 }
 
-#' Compare taxa newly flagged between two thresholds
-#'
-#' Reports features classified as contaminants at `threshold_high` but not at
-#' `threshold_low`. The result makes biological-signal loss visible without
-#' claiming that either threshold is optimal.
-#'
-#' @inheritParams summarize_flagged_taxa
-#' @param threshold_low Lower threshold included in the sweep.
-#' @param threshold_high Higher threshold included in the sweep.
-#' @return A taxonomy summary for newly flagged features.
-#' @export
-compare_newly_flagged_taxa <- function(result,
-                                       threshold_low,
-                                       threshold_high,
-                                       taxonomy = "Genus") {
-  low <- .threshold_index(result, threshold_low)
-  high <- .threshold_index(result, threshold_high)
-  if (result$thresholds[low] >= result$thresholds[high]) {
-    stop("`threshold_low` must be less than `threshold_high`.", call. = FALSE)
-  }
-  taxa <- .taxonomy_for_result(result, taxonomy)
-  low_flags <- result$feature_flags$feature_id[
-    result$feature_flags$threshold == result$thresholds[low] &
-      result$feature_flags$contaminant
-  ]
-  high_flags <- result$feature_flags$feature_id[
-    result$feature_flags$threshold == result$thresholds[high] &
-      result$feature_flags$contaminant
-  ]
-  .aggregate_taxa(result, setdiff(high_flags, low_flags), taxa)
-}
-
-#' Summarize taxa newly flagged across adjacent thresholds
-#'
-#' @inheritParams summarize_flagged_taxa
-#' @return A data frame combining every adjacent threshold comparison.
-#' @export
-summarize_newly_flagged_intervals <- function(result, taxonomy = "Genus") {
-  if (!inherits(result, "decontam_sensitivity")) {
-    stop("`result` must be returned by `run_threshold_sweep()`.", call. = FALSE)
-  }
-  .taxonomy_for_result(result, taxonomy)
-  empty <- data.frame(
-    threshold_low = numeric(), threshold_high = numeric(),
-    taxon = character(), newly_flagged_features = integer(),
-    reads_biological = numeric(),
-    relative_abundance_biological_pct = numeric(),
-    reads_control = numeric(), relative_abundance_control_pct = numeric(),
-    stringsAsFactors = FALSE
-  )
-  if (length(result$thresholds) < 2L) return(empty)
-  pieces <- lapply(seq.int(2L, length(result$thresholds)), function(i) {
-    out <- compare_newly_flagged_taxa(
-      result, result$thresholds[i - 1L], result$thresholds[i], taxonomy
-    )
-    if (!nrow(out)) return(NULL)
-    out$threshold_low <- result$thresholds[i - 1L]
-    out$threshold_high <- result$thresholds[i]
-    out[, c(
-      "threshold_low", "threshold_high", "taxon",
-      "newly_flagged_features", "reads_biological",
-      "relative_abundance_biological_pct", "reads_control",
-      "relative_abundance_control_pct"
-    )]
-  })
-  pieces <- Filter(Negate(is.null), pieces)
-  if (!length(pieces)) return(empty)
-  rownames_out <- do.call(rbind, pieces)
-  rownames(rownames_out) <- NULL
-  rownames_out
-}
-
 .aggregate_taxa <- function(result, feature_ids, taxa) {
   empty <- data.frame(
-    taxon = character(), newly_flagged_features = integer(),
+    taxon = character(), flagged_features = integer(),
     reads_biological = numeric(), relative_abundance_biological_pct = numeric(),
     reads_control = numeric(), relative_abundance_control_pct = numeric(),
     stringsAsFactors = FALSE
@@ -207,7 +135,7 @@ summarize_newly_flagged_intervals <- function(result, taxonomy = "Genus") {
   out <- do.call(rbind, lapply(pieces, function(z) {
     data.frame(
       taxon = z$taxon[1L],
-      newly_flagged_features = nrow(z),
+      flagged_features = nrow(z),
       reads_biological = sum(z$reads_biological),
       relative_abundance_biological_pct = .safe_percent(
         sum(z$reads_biological), sum(result$counts[, !result$is_control, drop = FALSE])
@@ -220,5 +148,5 @@ summarize_newly_flagged_intervals <- function(result, taxonomy = "Genus") {
     )
   }))
   rownames(out) <- NULL
-  out[order(-out$reads_biological, -out$newly_flagged_features, out$taxon), , drop = FALSE]
+  out[order(-out$reads_biological, -out$flagged_features, out$taxon), , drop = FALSE]
 }

@@ -70,10 +70,7 @@ qc <- run_decontam_qc(
   control_column = "control_status",
   control_label = "control",
   thresholds = seq(0.1, 0.9, by = 0.1),
-  selected_threshold = 0.5,
-  comparison_threshold_low = 0.4,
-  taxonomy = "Genus",
-  plot_all_thresholds = TRUE
+  taxonomy = "Genus"
 )
 
 qc
@@ -102,11 +99,11 @@ qc$plots$sample_retention
 ```
 
 ```{r flagged-genera}
-qc$plots$flagged_taxa_reads
+qc$plots$flagged_taxa_reads_by_threshold[["0.5"]]
 ```
 
 ```{r genus-before-after, fig.width=12, fig.height=7}
-qc$plots$taxa_reads_before_after
+qc$plots$taxa_reads_before_after_by_threshold[["0.5"]]
 ```
 
 ```{r prevalence-enrichment}
@@ -134,7 +131,7 @@ for (plot_object in qc$plots$taxa_reads_before_after_by_threshold) {
 # 7. 필터링된 phyloseq 사용
 
 ```{r filtered-phyloseq}
-phy_decontam <- qc$filtered_phyloseq
+phy_decontam <- qc$filtered_phyloseq_by_threshold[["0.5"]]
 phy_decontam
 
 # 필요할 때만 저장한다.
