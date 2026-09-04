@@ -275,6 +275,28 @@ microbiome analysis:
 
 [Scientific Reports (2026), threshold sensitivity analysis](https://www.nature.com/articles/s41598-026-62903-7#Sec17)
 
+The following aggregated QC outputs illustrate the workflow on the published
+healthy-volunteer skin microbiome analysis.
+
+### Threshold sensitivity
+
+![Threshold-specific read and feature retention](man/figures/hv_threshold_sensitivity.png)
+
+### Sample-level read retention
+
+![Distribution of sample-level read retention](man/figures/hv_sample_retention.png)
+
+### Flagged genus read counts
+
+![Flagged genus read counts at threshold 0.1](man/figures/hv_flagged_taxa_threshold_0.1.png)
+
+### Animated threshold comparison
+
+![Flagged genus read counts across thresholds](man/figures/hv_flagged_taxa_by_threshold.gif)
+
+See the [English HV workflow vignette](vignettes/hv-threshold-sensitivity.Rmd)
+for the complete package workflow and animation code.
+
 ## Citation
 
 `decontamSensitivity` uses contaminant scores produced by `decontam`; therefore,

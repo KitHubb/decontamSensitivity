@@ -1,7 +1,7 @@
 Package: decontamSensitivity
 Type: Package
 Title: Sensitivity Diagnostics for 'decontam' Thresholds
-Version: 0.1.5
+Version: 0.1.6
 Authors@R: c(
     person(
       "Soyeon", "Kim",
@@ -31,7 +31,12 @@ Imports:
     phyloseq,
     RColorBrewer
 Suggests:
+    gganimate,
+    gifski,
+    knitr,
+    rmarkdown,
     testthat (>= 3.0.0)
+VignetteBuilder: knitr
 Config/testthat/edition: 3
 Roxygen: list(markdown = TRUE)
 Config/roxygen2/version: 8.0.0
