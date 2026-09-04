@@ -20,6 +20,9 @@
 #' @param plot_all_thresholds Logical; when `TRUE`, also create named lists of
 #'   flagged-taxa and before/after composition plots for every evaluated
 #'   threshold. The selected-threshold plots are always returned separately.
+#' @param progress Logical; display a `cli` progress bar. The default is `TRUE`
+#'   in interactive sessions and `FALSE` during non-interactive execution such
+#'   as R Markdown rendering and automated tests.
 #' @return An object of class `decontam_qc` with `result`, `filtered_phyloseq`,
 #'   `group_phyloseq`, `tables`, and `plots` components.
 #' @export
@@ -31,7 +34,8 @@
 #'   control_label = "control",
 #'   thresholds = seq(0.1, 0.9, 0.1),
 #'   selected_threshold = 0.5,
-#'   plot_all_thresholds = TRUE
+#'   plot_all_thresholds = TRUE,
+#'   progress = TRUE
 #' )
 #' qc$plots$sample_retention
 #' qc$plots$taxa_reads_before_after
@@ -49,11 +53,15 @@ run_decontam_qc <- function(ps,
                             top_n_flagged = 20L,
                             top_n_composition = 15L,
                             prevalence_pseudocount = 0.5,
-                            plot_all_thresholds = FALSE) {
+                            plot_all_thresholds = FALSE,
+                            progress = interactive()) {
   thresholds <- .validate_thresholds(thresholds)
   if (!is.logical(plot_all_thresholds) ||
       length(plot_all_thresholds) != 1L || is.na(plot_all_thresholds)) {
     stop("`plot_all_thresholds` must be `TRUE` or `FALSE`.", call. = FALSE)
+  }
+  if (!is.logical(progress) || length(progress) != 1L || is.na(progress)) {
+    stop("`progress` must be `TRUE` or `FALSE`.", call. = FALSE)
   }
   if (!is.numeric(selected_threshold) || length(selected_threshold) != 1L ||
       is.na(selected_threshold) || !any(abs(thresholds - selected_threshold) <
@@ -82,6 +90,34 @@ run_decontam_qc <- function(ps,
     ]
   }
 
+  plot_steps <- if (isTRUE(plot_all_thresholds)) {
+    2L * length(thresholds)
+  } else {
+    2L
+  }
+  progress_id <- NULL
+  if (isTRUE(progress)) {
+    progress_id <- cli::cli_progress_bar(
+      name = "decontam QC",
+      type = "tasks",
+      total = 4L + plot_steps,
+      clear = FALSE
+    )
+    on.exit({
+      if (!is.null(progress_id)) {
+        cli::cli_progress_done(id = progress_id)
+      }
+    }, add = TRUE)
+  }
+  update_progress <- function(status) {
+    if (!is.null(progress_id)) {
+      cli::cli_progress_update(
+        id = progress_id, inc = 1L, status = status
+      )
+    }
+    invisible(NULL)
+  }
+
   result <- run_decontam_threshold_sweep(
     ps = ps,
     control_column = control_column,
@@ -91,12 +127,14 @@ run_decontam_qc <- function(ps,
     batch_combine = match.arg(batch_combine),
     normalize = normalize
   )
+  update_progress("decontam prevalence scores")
   filtered <- filter_phyloseq_at_threshold(
     ps, result, selected_threshold, prune_zero = TRUE
   )
   groups <- split_phyloseq_groups(
     ps, control_column, control_label, prune_zero = TRUE
   )
+  update_progress("filtered phyloseq and sample groups")
   flagged_taxa <- summarize_flagged_taxa(
     result, selected_threshold, taxonomy
   )
@@ -145,6 +183,7 @@ run_decontam_qc <- function(ps,
       result, taxonomy
     )
   )
+  update_progress("QC summary tables")
   threshold_names <- format(thresholds, trim = TRUE, scientific = FALSE)
   selected_name <- format(
     selected_threshold, trim = TRUE, scientific = FALSE
@@ -155,20 +194,27 @@ run_decontam_qc <- function(ps,
         taxa_at_threshold <- summarize_flagged_taxa(
           result, threshold, taxonomy
         )
-        if (!nrow(taxa_at_threshold)) return(NULL)
-        plot_flagged_taxa_reads(
-          result, threshold, taxonomy, top_n_flagged,
-          measure = "mean_per_sample"
-        )
+        plot_object <- if (nrow(taxa_at_threshold)) {
+          plot_flagged_taxa_reads(
+            result, threshold, taxonomy, top_n_flagged,
+            measure = "mean_per_sample"
+          )
+        } else {
+          NULL
+        }
+        update_progress(paste("flagged taxa at threshold", threshold))
+        plot_object
       }),
       threshold_names
     )
     taxa_before_after_by_threshold <- stats::setNames(
       lapply(thresholds, function(threshold) {
-        plot_taxa_reads_before_after(
+        plot_object <- plot_taxa_reads_before_after(
           ps, result, threshold, control_column, control_label,
           taxonomy, top_n_composition
         )
+        update_progress(paste("before/after taxa at threshold", threshold))
+        plot_object
       }),
       threshold_names
     )
@@ -186,10 +232,12 @@ run_decontam_qc <- function(ps,
     } else {
       NULL
     }
+    update_progress(paste("flagged taxa at threshold", selected_threshold))
     taxa_before_after_plot <- plot_taxa_reads_before_after(
       ps, result, selected_threshold, control_column, control_label,
       taxonomy, top_n_composition
     )
+    update_progress(paste("before/after taxa at threshold", selected_threshold))
   }
   plots <- list(
     score_distribution = plot_decontam_scores(result),
@@ -204,6 +252,11 @@ run_decontam_qc <- function(ps,
     flagged_taxa_reads_by_threshold = flagged_taxa_by_threshold,
     taxa_reads_before_after_by_threshold = taxa_before_after_by_threshold
   )
+  update_progress("core QC plots")
+  if (!is.null(progress_id)) {
+    cli::cli_progress_done(id = progress_id)
+    progress_id <- NULL
+  }
   structure(list(
     result = result,
     selected_threshold = selected_threshold,

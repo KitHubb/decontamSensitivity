@@ -185,3 +185,21 @@ test_that("one-call QC can create taxa plots for every threshold", {
     qc$plots$taxa_reads_before_after_by_threshold[["0.5"]]
   )
 })
+
+test_that("one-call QC validates the progress option", {
+  skip_if_not_installed("phyloseq")
+  skip_if_not_installed("decontam")
+  ps <- make_toy_ps()
+  expect_error(
+    run_decontam_qc(
+      ps,
+      control_column = "type",
+      control_label = "control",
+      thresholds = c(0.1, 0.5),
+      selected_threshold = 0.5,
+      progress = NA
+    ),
+    "`progress` must be `TRUE` or `FALSE`",
+    fixed = TRUE
+  )
+})

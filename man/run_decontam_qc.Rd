@@ -18,7 +18,8 @@ run_decontam_qc(
   top_n_flagged = 20L,
   top_n_composition = 15L,
   prevalence_pseudocount = 0.5,
-  plot_all_thresholds = FALSE
+  plot_all_thresholds = FALSE,
+  progress = interactive()
 )
 }
 \arguments{
@@ -55,6 +56,10 @@ composition plot.}
 \item{plot_all_thresholds}{Logical; when \code{TRUE}, also create named lists of
 flagged-taxa and before/after composition plots for every evaluated
 threshold. The selected-threshold plots are always returned separately.}
+
+\item{progress}{Logical; display a \code{cli} progress bar. The default is \code{TRUE}
+in interactive sessions and \code{FALSE} during non-interactive execution such
+as R Markdown rendering and automated tests.}
 }
 \value{
 An object of class \code{decontam_qc} with \code{result}, \code{filtered_phyloseq},
@@ -74,7 +79,8 @@ qc <- run_decontam_qc(
   control_label = "control",
   thresholds = seq(0.1, 0.9, 0.1),
   selected_threshold = 0.5,
-  plot_all_thresholds = TRUE
+  plot_all_thresholds = TRUE,
+  progress = TRUE
 )
 qc$plots$sample_retention
 qc$plots$taxa_reads_before_after

@@ -1,7 +1,7 @@
 Package: decontamSensitivity
 Type: Package
 Title: Sensitivity Diagnostics for 'decontam' Thresholds
-Version: 0.1.1
+Version: 0.1.2
 Authors@R: c(
     person(
       "Soyeon", "Kim",
@@ -24,6 +24,7 @@ Encoding: UTF-8
 Depends:
     R (>= 4.1.0)
 Imports:
+    cli,
     decontam,
     ggplot2,
     methods,

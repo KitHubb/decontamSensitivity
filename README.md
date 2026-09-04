@@ -28,7 +28,7 @@ install.packages("pak") # Run once if pak is not installed
 pak::pak("KitHubb/decontamSensitivity")
 
 library(decontamSensitivity)
-packageVersion("decontamSensitivity") # 0.1.1 or later
+packageVersion("decontamSensitivity") # 0.1.2 or later
 ```
 
 `pak` installs the required `decontam`, `phyloseq`, and `ggplot2`
@@ -86,7 +86,8 @@ qc <- run_decontam_qc(
   thresholds = seq(0.1, 0.5, 0.1),
   selected_threshold = 0.1,
   batch = "SequencingRun",
-  plot_all_thresholds = TRUE
+  plot_all_thresholds = TRUE,
+  progress = TRUE
 )
 
 qc$tables$threshold_summary
@@ -105,6 +106,10 @@ qc$plots$taxa_reads_before_after_by_threshold[["0.5"]]
 
 ps_filtered <- qc$filtered_phyloseq
 ```
+
+`progress` defaults to `interactive()`: it is shown automatically in an
+interactive R/RStudio session and suppressed during R Markdown rendering or
+automated tests. Set `progress = TRUE` or `FALSE` to override this behavior.
 
 The plot and summary functions are also exported individually when only one
 component is needed, including `plot_sample_read_retention()`,
