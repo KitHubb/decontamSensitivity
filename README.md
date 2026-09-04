@@ -290,9 +290,13 @@ healthy-volunteer skin microbiome analysis.
 
 ![Flagged genus read counts at threshold 0.1](man/figures/hv_flagged_taxa_threshold_0.1.png)
 
-### Animated threshold comparison
+### Animated flagged-taxa comparison
 
 ![Flagged genus read counts across thresholds](man/figures/hv_flagged_taxa_by_threshold.gif)
+
+### Animated taxa composition before and after filtering
+
+![Taxa read composition before and after filtering across thresholds](man/figures/hv_taxa_reads_before_after_by_threshold.gif)
 
 See the [English HV workflow vignette](vignettes/hv-threshold-sensitivity.Rmd)
 for the complete package workflow and animation code.

@@ -105,10 +105,18 @@ knitr::include_graphics("../man/figures/hv_sample_retention.png")
 knitr::include_graphics("../man/figures/hv_flagged_taxa_threshold_0.1.png")
 ```
 
-### Animated threshold comparison
+### Animated flagged-taxa comparison
 
 ```{r flagged-animation, echo=FALSE, out.width="100%"}
 knitr::include_graphics("../man/figures/hv_flagged_taxa_by_threshold.gif")
+```
+
+### Animated taxa composition before and after filtering
+
+Sample labels are suppressed in this public aggregate display.
+
+```{r before-after-animation, echo=FALSE, out.width="100%"}
+knitr::include_graphics("../man/figures/hv_taxa_reads_before_after_by_threshold.gif")
 ```
 
 ## Create the flagged-taxa animation
