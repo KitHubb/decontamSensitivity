@@ -165,11 +165,6 @@ summarize_flagged_taxa(result, threshold = 0.1, taxonomy = "Genus")
 See [`examples/published_skin_microbiome_example.R`](examples/published_skin_microbiome_example.R)
 for the schema used by the published workflow.
 
-The DT Swab dataset can be evaluated directly with the package using
-[`examples/DT_swab_threshold_sensitivity.Rmd`](examples/DT_swab_threshold_sensitivity.Rmd).
-This report restores the five negative-control labels from the study metadata
-and runs the complete QC output for thresholds 0.1--0.9.
-
 ## Interpretation
 
 A threshold can be considered conservative when negative-control reads are

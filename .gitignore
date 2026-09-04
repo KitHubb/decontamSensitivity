@@ -5,8 +5,8 @@
 .Rproj.user/
 *.Rcheck/
 *.tar.gz
-DT_function_output/
-DT_simple_output/
+*_function_output/
+*_simple_output/
 data/
 data-raw/
 R/data.R
