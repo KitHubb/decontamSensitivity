@@ -7,7 +7,7 @@
 plot_sample_read_retention(result, show_points = TRUE)
 }
 \arguments{
-\item{result}{A result from [run_threshold_sweep()].}
+\item{result}{A result from \code{\link[=run_threshold_sweep]{run_threshold_sweep()}}.}
 
 \item{show_points}{Logical; overlay individual samples.}
 }

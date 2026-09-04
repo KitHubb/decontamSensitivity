@@ -31,19 +31,19 @@ run_decontam_qc(
 \item{thresholds}{Numeric thresholds to evaluate.}
 
 \item{selected_threshold}{Prespecified threshold used for taxonomic summaries
-and the filtered phyloseq object. It must occur in `thresholds`.}
+and the filtered phyloseq object. It must occur in \code{thresholds}.}
 
 \item{comparison_threshold_low}{Optional lower threshold for the newly flagged
-taxa table. If `NULL`, the nearest evaluated threshold below
-`selected_threshold` is used when available.}
+taxa table. If \code{NULL}, the nearest evaluated threshold below
+\code{selected_threshold} is used when available.}
 
 \item{taxonomy}{Taxonomic rank used in summaries and plots.}
 
-\item{batch}{Optional sample-data column used as the `decontam` batch.}
+\item{batch}{Optional sample-data column used as the \code{decontam} batch.}
 
-\item{batch_combine}{Method used by `decontam` to combine batch scores.}
+\item{batch_combine}{Method used by \code{decontam} to combine batch scores.}
 
-\item{normalize}{Passed to [decontam::isContaminant()].}
+\item{normalize}{Passed to \code{\link[decontam:isContaminant]{decontam::isContaminant()}}.}
 
 \item{top_n_flagged}{Maximum flagged taxa shown in the read-count plot.}
 
@@ -52,13 +52,13 @@ composition plot.}
 
 \item{prevalence_pseudocount}{Correction used in prevalence enrichment ratios.}
 
-\item{plot_all_thresholds}{Logical; when `TRUE`, also create named lists of
+\item{plot_all_thresholds}{Logical; when \code{TRUE}, also create named lists of
 flagged-taxa and before/after composition plots for every evaluated
 threshold. The selected-threshold plots are always returned separately.}
 }
 \value{
-An object of class `decontam_qc` with `result`, `filtered_phyloseq`,
-  `group_phyloseq`, `tables`, and `plots` components.
+An object of class \code{decontam_qc} with \code{result}, \code{filtered_phyloseq},
+\code{group_phyloseq}, \code{tables}, and \code{plots} components.
 }
 \description{
 One-call interface for a phyloseq object. It calculates prevalence scores,

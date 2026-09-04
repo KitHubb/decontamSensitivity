@@ -7,12 +7,12 @@
 summarize_flagged_taxa(result, threshold, taxonomy = "Genus")
 }
 \arguments{
-\item{result}{A result from [run_threshold_sweep()].}
+\item{result}{A result from \code{\link[=run_threshold_sweep]{run_threshold_sweep()}}.}
 
 \item{threshold}{A threshold included in the sweep.}
 
-\item{taxonomy}{Taxonomy column to aggregate, such as `"Genus"` or
-`"Species"`.}
+\item{taxonomy}{Taxonomy column to aggregate, such as \code{"Genus"} or
+\code{"Species"}.}
 }
 \value{
 A taxonomy summary ordered by biological-sample read abundance.

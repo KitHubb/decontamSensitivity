@@ -9,9 +9,9 @@ filter_phyloseq_at_threshold(ps, result, threshold, prune_zero = TRUE)
 \arguments{
 \item{ps}{A phyloseq object.}
 
-\item{result}{A result from [run_threshold_sweep()].}
+\item{result}{A result from \code{\link[=run_threshold_sweep]{run_threshold_sweep()}}.}
 
-\item{threshold}{A threshold included in `result`.}
+\item{threshold}{A threshold included in \code{result}.}
 
 \item{prune_zero}{Logical; remove features with zero reads within each group.}
 }

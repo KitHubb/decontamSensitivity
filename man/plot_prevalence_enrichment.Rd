@@ -20,21 +20,21 @@ plot_prevalence_enrichment(
 
 \item{control_label}{Value or values identifying negative controls.}
 
-\item{prevalence_unit}{Use the original prevalence counts (`"count"`) or
-prevalence proportions (`"proportion"`). Proportions are preferable when
+\item{prevalence_unit}{Use the original prevalence counts (\code{"count"}) or
+prevalence proportions (\code{"proportion"}). Proportions are preferable when
 the two groups contain different numbers of samples.}
 
 \item{pseudocount}{Non-negative correction used for prevalence proportions.
 With the default 0.5, the corrected proportion is
-`(observed + 0.5) / (samples + 1)`.}
+\code{(observed + 0.5) / (samples + 1)}.}
 
 \item{log10_x}{Logical; use a log10 scale for the prevalence ratio.}
 }
 \value{
 A ggplot object. The underlying feature table is available through
-  `summarize_control_prevalence()`.
+\code{summarize_control_prevalence()}.
 }
 \description{
-Replaces the complete `kA`, `odds.sample`, `odds.control`, `p1`, `p2`, and
-`ggarrange()` block with one function call.
+Replaces the complete \code{kA}, \code{odds.sample}, \code{odds.control}, \code{p1}, \code{p2}, and
+\code{ggarrange()} block with one function call.
 }

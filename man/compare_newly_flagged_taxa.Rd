@@ -12,20 +12,20 @@ compare_newly_flagged_taxa(
 )
 }
 \arguments{
-\item{result}{A result from [run_threshold_sweep()].}
+\item{result}{A result from \code{\link[=run_threshold_sweep]{run_threshold_sweep()}}.}
 
 \item{threshold_low}{Lower threshold included in the sweep.}
 
 \item{threshold_high}{Higher threshold included in the sweep.}
 
-\item{taxonomy}{Taxonomy column to aggregate, such as `"Genus"` or
-`"Species"`.}
+\item{taxonomy}{Taxonomy column to aggregate, such as \code{"Genus"} or
+\code{"Species"}.}
 }
 \value{
 A taxonomy summary for newly flagged features.
 }
 \description{
-Reports features classified as contaminants at `threshold_high` but not at
-`threshold_low`. The result makes biological-signal loss visible without
+Reports features classified as contaminants at \code{threshold_high} but not at
+\code{threshold_low}. The result makes biological-signal loss visible without
 claiming that either threshold is optimal.
 }

@@ -16,9 +16,9 @@ plot_taxa_reads_before_after(
 )
 }
 \arguments{
-\item{ps}{A phyloseq object used to produce `result`.}
+\item{ps}{A phyloseq object used to produce \code{result}.}
 
-\item{result}{A result from [run_threshold_sweep()].}
+\item{result}{A result from \code{\link[=run_threshold_sweep]{run_threshold_sweep()}}.}
 
 \item{threshold}{A threshold included in the sweep.}
 
@@ -26,8 +26,8 @@ plot_taxa_reads_before_after(
 
 \item{control_label}{Value or values identifying negative controls.}
 
-\item{taxonomy}{Taxonomy column to aggregate, such as `"Genus"` or
-`"Species"`.}
+\item{taxonomy}{Taxonomy column to aggregate, such as \code{"Genus"} or
+\code{"Species"}.}
 
 \item{top_n}{Number of most abundant taxa to display individually.}
 

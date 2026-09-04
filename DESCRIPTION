@@ -1,7 +1,7 @@
 Package: decontamSensitivity
 Type: Package
 Title: Sensitivity Diagnostics for 'decontam' Thresholds
-Version: 0.1.0
+Version: 0.1.1
 Authors@R: c(
     person(
       "Soyeon", "Kim",
@@ -18,18 +18,18 @@ Description: Evaluates how contaminant-classification thresholds affect
     diagnostic layer; it does not reimplement contaminant identification or
     select an optimal threshold automatically.
 License: MIT + file LICENSE
+URL: https://github.com/KitHubb/decontamSensitivity
+BugReports: https://github.com/KitHubb/decontamSensitivity/issues
 Encoding: UTF-8
 Depends:
     R (>= 4.1.0)
 Imports:
-    ggplot2,
-    methods
-Suggests:
     decontam,
-    devtools,
-    knitr,
-    phyloseq,
-    rmarkdown,
+    ggplot2,
+    methods,
+    phyloseq
+Suggests:
     testthat (>= 3.0.0)
 Config/testthat/edition: 3
+Roxygen: list(markdown = TRUE)
 Config/roxygen2/version: 8.0.0

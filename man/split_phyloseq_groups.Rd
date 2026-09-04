@@ -16,9 +16,9 @@ split_phyloseq_groups(ps, control_column, control_label, prune_zero = TRUE)
 \item{prune_zero}{Logical; remove features with zero reads within each group.}
 }
 \value{
-A named list containing `biological` and `control` phyloseq objects.
+A named list containing \code{biological} and \code{control} phyloseq objects.
 }
 \description{
-Replaces repeated `subset_samples()` and `prune_taxa()` blocks with one
+Replaces repeated \code{subset_samples()} and \code{prune_taxa()} blocks with one
 explicit, reusable operation.
 }

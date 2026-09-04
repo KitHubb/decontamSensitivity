@@ -19,21 +19,21 @@ calculate_prevalence_enrichment(
 
 \item{control_label}{Value or values identifying negative controls.}
 
-\item{prevalence_unit}{Use the original prevalence counts (`"count"`) or
-prevalence proportions (`"proportion"`). Proportions are preferable when
+\item{prevalence_unit}{Use the original prevalence counts (\code{"count"}) or
+prevalence proportions (\code{"proportion"}). Proportions are preferable when
 the two groups contain different numbers of samples.}
 
 \item{pseudocount}{Non-negative correction added to the ratio inputs. Use
-zero with `prevalence_unit = "count"` to reproduce the original code
+zero with \code{prevalence_unit = "count"} to reproduce the original code
 exactly.}
 }
 \value{
 A feature-level data frame containing the original project column
-  names plus explicit count and proportion columns.
+names plus explicit count and proportion columns.
 }
 \description{
-Reproduces the `kA`, `odds.sample`, `odds.control`, and `summarized`
+Reproduces the \code{kA}, \code{odds.sample}, \code{odds.control}, and \code{summarized}
 calculations from the original analysis in one call. Despite the legacy
-column name, `odds.sample` is a prevalence ratio, not a statistical odds
+column name, \code{odds.sample} is a prevalence ratio, not a statistical odds
 ratio.
 }

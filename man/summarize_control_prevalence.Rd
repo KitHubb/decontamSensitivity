@@ -20,10 +20,10 @@ summarize_control_prevalence(
 
 \item{pseudocount}{Non-negative correction used for prevalence proportions.
 With the default 0.5, the corrected proportion is
-`(observed + 0.5) / (samples + 1)`.}
+\code{(observed + 0.5) / (samples + 1)}.}
 }
 \value{
-A feature-level data frame aligned to `taxa_names(ps)`.
+A feature-level data frame aligned to \code{taxa_names(ps)}.
 }
 \description{
 Uses read totals for abundance and the proportion of samples containing each

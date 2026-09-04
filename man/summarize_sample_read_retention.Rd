@@ -7,13 +7,13 @@
 summarize_sample_read_retention(result)
 }
 \arguments{
-\item{result}{A result from [run_threshold_sweep()].}
+\item{result}{A result from \code{\link[=run_threshold_sweep]{run_threshold_sweep()}}.}
 }
 \value{
 A data frame with sample count, zero-read count, and the minimum and
-  median percentage of reads retained for each threshold and sample group.
+median percentage of reads retained for each threshold and sample group.
 }
 \description{
 Converts the per-sample results into threshold-by-group summaries suitable
-for reporting alongside [plot_sample_read_retention()].
+for reporting alongside \code{\link[=plot_sample_read_retention]{plot_sample_read_retention()}}.
 }

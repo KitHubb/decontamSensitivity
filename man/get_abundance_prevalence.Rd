@@ -10,8 +10,8 @@ get_abundance_prevalence(ps)
 \item{ps}{A phyloseq object.}
 }
 \value{
-A data frame with taxa as row names and columns `Abundance` and
-  `Prevalence`.
+A data frame with taxa as row names and columns \code{Abundance} and
+\code{Prevalence}.
 }
 \description{
 This is the package version of the original project helper with the same

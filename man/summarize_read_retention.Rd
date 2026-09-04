@@ -7,7 +7,7 @@
 summarize_read_retention(result)
 }
 \arguments{
-\item{result}{A result from [run_threshold_sweep()].}
+\item{result}{A result from \code{\link[=run_threshold_sweep]{run_threshold_sweep()}}.}
 }
 \value{
 A data frame with one row per threshold and sample group.

@@ -15,7 +15,7 @@ summarize_library_sizes_by_group(ps, control_column, control_label)
 }
 \value{
 A data frame containing group size and the standard library-size
-  summary statistics.
+summary statistics.
 }
 \description{
 Summarize library sizes by sample group

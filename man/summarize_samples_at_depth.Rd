@@ -7,11 +7,11 @@
 summarize_samples_at_depth(result, depth, group = c("biological", "control"))
 }
 \arguments{
-\item{result}{A result from [run_threshold_sweep()].}
+\item{result}{A result from \code{\link[=run_threshold_sweep]{run_threshold_sweep()}}.}
 
 \item{depth}{Positive read-depth cutoff.}
 
-\item{group}{One of `"biological"` or `"control"`.}
+\item{group}{One of \code{"biological"} or \code{"control"}.}
 }
 \value{
 A threshold-level data frame.

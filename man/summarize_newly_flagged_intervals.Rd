@@ -7,10 +7,10 @@
 summarize_newly_flagged_intervals(result, taxonomy = "Genus")
 }
 \arguments{
-\item{result}{A result from [run_threshold_sweep()].}
+\item{result}{A result from \code{\link[=run_threshold_sweep]{run_threshold_sweep()}}.}
 
-\item{taxonomy}{Taxonomy column to aggregate, such as `"Genus"` or
-`"Species"`.}
+\item{taxonomy}{Taxonomy column to aggregate, such as \code{"Genus"} or
+\code{"Species"}.}
 }
 \value{
 A data frame combining every adjacent threshold comparison.

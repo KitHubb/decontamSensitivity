@@ -22,46 +22,46 @@ run_threshold_sweep(
 \arguments{
 \item{decontam_result}{A data frame containing one row per feature and a
 score column, normally the detailed output from
-[decontam::isContaminant()]. Feature IDs must be row names unless
-`feature_id_column` is supplied.}
+\code{\link[decontam:isContaminant]{decontam::isContaminant()}}. Feature IDs must be row names unless
+\code{feature_id_column} is supplied.}
 
 \item{count_table}{Numeric feature-by-sample matrix. A sample-by-feature
-matrix is also accepted when `features_are_rows = FALSE`, or can be
+matrix is also accepted when \code{features_are_rows = FALSE}, or can be
 inferred from metadata IDs.}
 
 \item{metadata}{Data frame with one row per sample. Sample IDs must be row
-names unless `sample_id_column` is supplied.}
+names unless \code{sample_id_column} is supplied.}
 
 \item{control_column}{Metadata column identifying negative controls.}
 
-\item{control_label}{Value or values in `control_column` that identify
+\item{control_label}{Value or values in \code{control_column} that identify
 negative controls.}
 
 \item{thresholds}{Numeric thresholds between zero and one. A feature is
 classified as a contaminant when its score is strictly less than the
-threshold, matching `decontam`.}
+threshold, matching \code{decontam}.}
 
 \item{taxonomy}{Optional data frame containing feature taxonomy. Feature IDs
-must be row names unless `taxonomy_id_column` is supplied.}
+must be row names unless \code{taxonomy_id_column} is supplied.}
 
 \item{score_column}{Name of the contaminant score column.}
 
-\item{feature_id_column}{Optional feature-ID column in `decontam_result`.}
+\item{feature_id_column}{Optional feature-ID column in \code{decontam_result}.}
 
-\item{sample_id_column}{Optional sample-ID column in `metadata`.}
+\item{sample_id_column}{Optional sample-ID column in \code{metadata}.}
 
-\item{taxonomy_id_column}{Optional feature-ID column in `taxonomy`.}
+\item{taxonomy_id_column}{Optional feature-ID column in \code{taxonomy}.}
 
 \item{features_are_rows}{Logical indicating count-table orientation. If
-`NULL`, orientation is inferred from sample IDs.}
+\code{NULL}, orientation is inferred from sample IDs.}
 }
 \value{
-An object of class `decontam_sensitivity` containing threshold,
-  feature, read, and sample summaries plus aligned source data.
+An object of class \code{decontam_sensitivity} containing threshold,
+feature, read, and sample summaries plus aligned source data.
 }
 \description{
 Applies multiple classification thresholds to feature scores already
-produced by [decontam::isContaminant()]. For each threshold, the function
+produced by \code{\link[decontam:isContaminant]{decontam::isContaminant()}}. For each threshold, the function
 quantifies read retention, feature retention, sample dropout, and feature
 classifications in biological samples and negative controls.
 }

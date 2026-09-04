@@ -15,7 +15,7 @@ run_decontam_threshold_sweep(
 )
 }
 \arguments{
-\item{ps}{A `phyloseq` object.}
+\item{ps}{A \code{phyloseq} object.}
 
 \item{control_column}{Sample-data column identifying negative controls.}
 
@@ -23,18 +23,18 @@ run_decontam_threshold_sweep(
 
 \item{thresholds}{Numeric thresholds to evaluate.}
 
-\item{batch}{Optional sample-data column used as the `decontam` batch.}
+\item{batch}{Optional sample-data column used as the \code{decontam} batch.}
 
-\item{batch_combine}{Method used by `decontam` to combine batch scores.}
+\item{batch_combine}{Method used by \code{decontam} to combine batch scores.}
 
-\item{normalize}{Passed to [decontam::isContaminant()].}
+\item{normalize}{Passed to \code{\link[decontam:isContaminant]{decontam::isContaminant()}}.}
 }
 \value{
-A `decontam_sensitivity` object.
+A \code{decontam_sensitivity} object.
 }
 \description{
-Convenience wrapper that calculates one set of `decontam` prevalence
+Convenience wrapper that calculates one set of \code{decontam} prevalence
 scores, then passes those scores and the aligned data to
-[run_threshold_sweep()]. Thresholds are applied downstream, so the
+\code{\link[=run_threshold_sweep]{run_threshold_sweep()}}. Thresholds are applied downstream, so the
 statistical model is not refit for every threshold.
 }

@@ -7,12 +7,12 @@
 plot_decontam_scores(result, bins = 50L)
 }
 \arguments{
-\item{result}{A result from [run_threshold_sweep()].}
+\item{result}{A result from \code{\link[=run_threshold_sweep]{run_threshold_sweep()}}.}
 
 \item{bins}{Number of histogram bins.}
 }
 \value{
-A `ggplot` object with candidate thresholds marked.
+A \code{ggplot} object with candidate thresholds marked.
 }
 \description{
 Plot the distribution of decontam scores

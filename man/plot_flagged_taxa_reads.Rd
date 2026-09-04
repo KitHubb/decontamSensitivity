@@ -13,17 +13,17 @@ plot_flagged_taxa_reads(
 )
 }
 \arguments{
-\item{result}{A result from [run_threshold_sweep()].}
+\item{result}{A result from \code{\link[=run_threshold_sweep]{run_threshold_sweep()}}.}
 
 \item{threshold}{A threshold included in the sweep.}
 
-\item{taxonomy}{Taxonomy column to aggregate, such as `"Genus"` or
-`"Species"`.}
+\item{taxonomy}{Taxonomy column to aggregate, such as \code{"Genus"} or
+\code{"Species"}.}
 
 \item{top_n}{Maximum number of taxa to display.}
 
-\item{measure}{Either `"mean_per_sample"` (recommended when groups contain
-different sample counts) or `"total"`.}
+\item{measure}{Either \code{"mean_per_sample"} (recommended when groups contain
+different sample counts) or \code{"total"}.}
 }
 \value{
 A ggplot object comparing biological samples and controls.

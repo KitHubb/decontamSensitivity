@@ -7,12 +7,12 @@
 plot_threshold_sensitivity(result, metric = c("both", "reads", "features"))
 }
 \arguments{
-\item{result}{A result from [run_threshold_sweep()].}
+\item{result}{A result from \code{\link[=run_threshold_sweep]{run_threshold_sweep()}}.}
 
-\item{metric}{One of `"both"`, `"reads"`, or `"features"`.}
+\item{metric}{One of \code{"both"}, \code{"reads"}, or \code{"features"}.}
 }
 \value{
-A `ggplot` object.
+A \code{ggplot} object.
 }
 \description{
 Plot threshold sensitivity

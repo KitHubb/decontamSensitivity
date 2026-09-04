@@ -20,10 +20,56 @@ It is a sensitivity diagnostic, not an automatic threshold optimizer.
 
 ## Installation
 
-During local development, install from the repository root:
+Install the latest version directly from GitHub with
+[`pak`](https://pak.r-lib.org/):
 
 ```r
-install.packages(".", repos = NULL, type = "source")
+install.packages("pak") # Run once if pak is not installed
+pak::pak("KitHubb/decontamSensitivity")
+
+library(decontamSensitivity)
+packageVersion("decontamSensitivity") # 0.1.1 or later
+```
+
+`pak` installs the required `decontam`, `phyloseq`, and `ggplot2`
+dependencies declared by the package. Restart the R session before reinstalling
+an already-loaded version, then verify that the public interface is available:
+
+```r
+packageVersion("decontamSensitivity")
+"run_decontam_qc" %in% getNamespaceExports("decontamSensitivity")
+```
+
+## Citation
+
+`decontamSensitivity` is a diagnostic companion to `decontam` and does not
+replace its contaminant-identification method. Analyses using this package
+should therefore cite the original `decontam` publication:
+
+> Davis NM, Proctor DM, Holmes SP, Relman DA, Callahan BJ. Simple statistical
+> identification and removal of contaminant sequences in marker-gene and
+> metagenomics data. *Microbiome*. 2018;6:226.
+> [https://doi.org/10.1186/s40168-018-0605-2](https://doi.org/10.1186/s40168-018-0605-2)
+
+```bibtex
+@article{Davis2018decontam,
+  author  = {Davis, Nicole M. and Proctor, Diana M. and Holmes, Susan P. and
+             Relman, David A. and Callahan, Benjamin J.},
+  title   = {Simple statistical identification and removal of contaminant
+             sequences in marker-gene and metagenomics data},
+  journal = {Microbiome},
+  year    = {2018},
+  volume  = {6},
+  pages   = {226},
+  doi     = {10.1186/s40168-018-0605-2}
+}
+```
+
+The citation bundled with the installed upstream package can also be checked
+from R:
+
+```r
+citation("decontam")
 ```
 
 ## One-call phyloseq workflow
@@ -143,15 +189,5 @@ model already uses control status.
 
 The initial workflow was used in the threshold sensitivity analysis reported
 in [Scientific Reports (2026)](https://www.nature.com/articles/s41598-026-62903-7#Sec17).
-The package cites the original `decontam` method and should be cited alongside
-it when used in analysis:
-
-- Davis NM, Proctor DM, Holmes SP, Relman DA, Callahan BJ. Simple statistical
-  identification and removal of contaminant sequences in marker-gene and
-  metagenomics data. *Microbiome*. 2018;6:226.
-
-## Development status
-
-Version 0.1 is an API prototype. Study and example datasets are not distributed
-with the repository; the included workflows expect users to provide their own
-phyloseq objects and metadata.
+The original `decontam` method listed in the [Citation](#citation) section
+should be cited alongside this workflow.
