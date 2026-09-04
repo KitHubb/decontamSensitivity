@@ -1,0 +1,35 @@
+Package: decontamSensitivity
+Type: Package
+Title: Sensitivity Diagnostics for 'decontam' Thresholds
+Version: 0.1.0
+Authors@R: c(
+    person(
+      "Soyeon", "Kim",
+      email = "kim.soyeon.bio@gmail.com",
+      role = c("aut", "cre")
+    )
+  )
+Author: Soyeon Kim [aut, cre]
+Maintainer: Soyeon Kim <kim.soyeon.bio@gmail.com>
+Description: Evaluates how contaminant-classification thresholds affect
+    biological-sample read retention, negative-control depletion, feature
+    retention, sample dropout, and the taxonomy of newly flagged features.
+    It consumes scores produced by the 'decontam' package and provides a
+    diagnostic layer; it does not reimplement contaminant identification or
+    select an optimal threshold automatically.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Depends:
+    R (>= 4.1.0)
+Imports:
+    ggplot2,
+    methods
+Suggests:
+    decontam,
+    devtools,
+    knitr,
+    phyloseq,
+    rmarkdown,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+Config/roxygen2/version: 8.0.0

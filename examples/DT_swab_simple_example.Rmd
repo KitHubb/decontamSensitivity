@@ -1,0 +1,142 @@
+---
+title: "DT Swab: decontamSensitivity 간단 실행 예제"
+output:
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 6
+)
+```
+
+# 1. 패키지 불러오기
+
+설치된 패키지를 불러온다.
+
+```{r packages}
+suppressPackageStartupMessages({
+  library(phyloseq)
+  library(ggplot2)
+  library(decontamSensitivity)
+})
+```
+
+# 2. DT phyloseq와 metadata 준비
+
+```{r data}
+project_dir <- "D:/KSY/Project/2.DT_Swab[논문작업pf남경화]/Rproj_DT_Swab"
+
+phy <- readRDS(file.path(
+  project_dir,
+  "Phyloseq/phy_F270R240_260812_v3.rds"
+))
+
+metadata <- read.delim(
+  file.path(project_dir, "metadata/DT_metadata.tsv"),
+  check.names = FALSE,
+  stringsAsFactors = FALSE
+)
+
+rownames(metadata) <- metadata$sample_id
+metadata <- metadata[sample_names(phy), , drop = FALSE]
+metadata$control_status[
+  metadata$control_status == "negative-control"
+] <- "control"
+
+stopifnot(
+  inherits(phy, "phyloseq"),
+  identical(sample_names(phy), rownames(metadata)),
+  !anyNA(metadata$control_status)
+)
+
+sample_data(phy) <- sample_data(metadata)
+phy
+```
+
+# 3. 전체 QC를 한 번에 실행
+
+OTU table이 `taxa × sample` 또는 `sample × taxa` 중 어느 방향이더라도
+패키지가 자동으로 확인하여 처리한다.
+
+```{r run-qc}
+qc <- run_decontam_qc(
+  ps = phy,
+  control_column = "control_status",
+  control_label = "control",
+  thresholds = seq(0.1, 0.9, by = 0.1),
+  selected_threshold = 0.5,
+  comparison_threshold_low = 0.4,
+  taxonomy = "Genus",
+  plot_all_thresholds = TRUE
+)
+
+qc
+```
+
+# 4. 결과표
+
+```{r tables}
+knitr::kable(qc$tables$threshold_summary, digits = 2)
+knitr::kable(qc$tables$library_size_summary, digits = 1)
+knitr::kable(head(qc$tables$flagged_taxa, 20), digits = 2)
+
+# 기존 kA, odds.sample, odds.control, summarized에 해당하는 표
+head(qc$tables$prevalence_enrichment)
+```
+
+# 5. 결과 그림
+
+```{r score-and-threshold, fig.height=8}
+qc$plots$score_distribution
+qc$plots$threshold_sensitivity
+```
+
+```{r sample-retention}
+qc$plots$sample_retention
+```
+
+```{r flagged-genera}
+qc$plots$flagged_taxa_reads
+```
+
+```{r genus-before-after, fig.width=12, fig.height=7}
+qc$plots$taxa_reads_before_after
+```
+
+```{r prevalence-enrichment}
+qc$plots$prevalence_enrichment
+```
+
+# 6. 모든 threshold의 taxa 그림
+
+각 목록의 이름은 `"0.1"`, `"0.2"`, ..., `"0.9"`이다. 특정 그림은
+`qc$plots$flagged_taxa_reads_by_threshold[["0.7"]]`처럼 꺼낼 수 있다.
+
+```{r all-flagged-taxa-plots, fig.height=7}
+for (threshold_name in names(qc$plots$flagged_taxa_reads_by_threshold)) {
+  plot_object <- qc$plots$flagged_taxa_reads_by_threshold[[threshold_name]]
+  if (!is.null(plot_object)) print(plot_object)
+}
+```
+
+```{r all-before-after-plots, fig.width=12, fig.height=7}
+for (plot_object in qc$plots$taxa_reads_before_after_by_threshold) {
+  print(plot_object)
+}
+```
+
+# 7. 필터링된 phyloseq 사용
+
+```{r filtered-phyloseq}
+phy_decontam <- qc$filtered_phyloseq
+phy_decontam
+
+# 필요할 때만 저장한다.
+# saveRDS(phy_decontam, file.path(project_dir, "Phyloseq/phy_decontam.rds"))
+```

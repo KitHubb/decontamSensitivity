@@ -1,0 +1,15 @@
+.Rhistory
+.RData
+.Ruserdata
+.Rprofile
+.Rproj.user/
+*.Rcheck/
+*.tar.gz
+DT_function_output/
+DT_simple_output/
+data/
+data-raw/
+R/data.R
+man/skin_example.Rd
+renv/
+renv.lock

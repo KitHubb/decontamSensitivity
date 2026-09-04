@@ -1,0 +1,7 @@
+^decontamSensitivity\.Rproj$
+^renv$
+^renv\.lock$
+^data-raw$
+^\.Rproj\.user$
+^\.git$
+^\.gitignore$

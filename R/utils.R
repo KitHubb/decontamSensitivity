@@ -1,0 +1,69 @@
+.assert_scalar_character <- function(x, name) {
+  if (!is.character(x) || length(x) != 1L || is.na(x) || !nzchar(x)) {
+    stop("`", name, "` must be one non-empty character value.", call. = FALSE)
+  }
+}
+
+.ids_from_data_frame <- function(x, id_column, object_name) {
+  if (!is.data.frame(x)) {
+    x <- as.data.frame(x, stringsAsFactors = FALSE)
+  }
+
+  if (!is.null(id_column)) {
+    .assert_scalar_character(id_column, paste0(object_name, "_id_column"))
+    if (!id_column %in% names(x)) {
+      stop("Column `", id_column, "` is not present in `", object_name, "`.",
+           call. = FALSE)
+    }
+    ids <- as.character(x[[id_column]])
+    x[[id_column]] <- NULL
+  } else {
+    ids <- rownames(x)
+  }
+
+  if (is.null(ids) || anyNA(ids) || any(!nzchar(ids)) || anyDuplicated(ids)) {
+    stop("`", object_name, "` must have unique, non-missing IDs.", call. = FALSE)
+  }
+  rownames(x) <- ids
+  x
+}
+
+.validate_thresholds <- function(thresholds) {
+  if (!is.numeric(thresholds) || !length(thresholds) || anyNA(thresholds) ||
+      any(!is.finite(thresholds)) || any(thresholds < 0 | thresholds > 1)) {
+    stop("`thresholds` must contain finite numeric values from 0 to 1.",
+         call. = FALSE)
+  }
+  sort(unique(as.numeric(thresholds)))
+}
+
+.safe_percent <- function(numerator, denominator) {
+  ifelse(denominator == 0, NA_real_, 100 * numerator / denominator)
+}
+
+.threshold_index <- function(result, threshold) {
+  if (!inherits(result, "decontam_sensitivity")) {
+    stop("`result` must be returned by `run_threshold_sweep()`.", call. = FALSE)
+  }
+  if (!is.numeric(threshold) || length(threshold) != 1L || is.na(threshold)) {
+    stop("`threshold` must be one numeric value.", call. = FALSE)
+  }
+  index <- which(abs(result$thresholds - threshold) < sqrt(.Machine$double.eps))
+  if (length(index) != 1L) {
+    stop("Threshold ", threshold, " was not included in the sweep.", call. = FALSE)
+  }
+  index
+}
+
+.taxonomy_for_result <- function(result, taxonomy) {
+  if (is.null(result$taxonomy)) {
+    stop("No taxonomy was supplied to `run_threshold_sweep()`.", call. = FALSE)
+  }
+  .assert_scalar_character(taxonomy, "taxonomy")
+  if (!taxonomy %in% names(result$taxonomy)) {
+    stop("Taxonomy column `", taxonomy, "` is not available.", call. = FALSE)
+  }
+  values <- as.character(result$taxonomy[[taxonomy]])
+  values[is.na(values) | !nzchar(values)] <- "Unclassified"
+  values
+}
