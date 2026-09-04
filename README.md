@@ -85,7 +85,7 @@ qc <- run_decontam_qc(
   thresholds = seq(0.1, 0.5, 0.1),
   batch = "SequencingRun",
   group_colors = c(
-    total = "black", biological = "steelblue", control = "tomato"
+    total = "black", biological = "tomato", control = "steelblue"
   ),
   progress = TRUE
 )

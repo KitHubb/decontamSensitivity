@@ -9,8 +9,8 @@ plot_threshold_sensitivity <- function(result,
                                        metric = c("both", "reads", "features"),
                                        group_colors = c(
                                          total = "black",
-                                         biological = "steelblue",
-                                         control = "tomato"
+                                         biological = "tomato",
+                                         control = "steelblue"
                                        )) {
   if (!inherits(result, "decontam_sensitivity")) {
     stop("`result` must be returned by `run_threshold_sweep()`.", call. = FALSE)
@@ -47,8 +47,7 @@ plot_threshold_sensitivity <- function(result,
     ggplot2::scale_y_continuous(limits = c(0, 100), breaks = seq(0, 100, 20)) +
     ggplot2::scale_x_continuous(breaks = result$thresholds) +
     ggplot2::labs(x = "decontam threshold", y = NULL, color = NULL, shape = NULL) +
-    ggplot2::theme_bw() +
-    ggplot2::theme(legend.position = "bottom")
+    .qc_theme()
   if (metric == "both") {
     p <- p + ggplot2::facet_wrap(~metric, ncol = 1L)
   } else {
@@ -73,5 +72,5 @@ plot_decontam_scores <- function(result, bins = 50L) {
       xintercept = result$thresholds, linetype = "dashed", color = "firebrick"
     ) +
     ggplot2::labs(x = "decontam score (p)", y = "Feature count") +
-    ggplot2::theme_bw()
+    .qc_theme()
 }

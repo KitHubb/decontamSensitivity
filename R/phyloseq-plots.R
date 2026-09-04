@@ -52,7 +52,7 @@ plot_prevalence_enrichment <- function(ps,
       x = paste0("Prevalence enrichment ratio (", prevalence_unit, ")"),
       y = "taxa_sum"
     ) +
-    ggplot2::theme_bw()
+    .qc_theme()
   if (isTRUE(log10_x)) p <- p + ggplot2::scale_x_log10()
   p
 }
@@ -68,7 +68,7 @@ plot_sample_read_retention <- function(
     result,
     show_points = TRUE,
     group_colors = c(
-      total = "black", biological = "steelblue", control = "tomato"
+      total = "black", biological = "tomato", control = "steelblue"
     )) {
   if (!inherits(result, "decontam_sensitivity")) {
     stop("`result` must be returned by `run_threshold_sweep()`.", call. = FALSE)
@@ -105,8 +105,7 @@ plot_sample_read_retention <- function(
       y = "Reads retained per sample (%)",
       fill = NULL
     ) +
-    ggplot2::theme_bw() +
-    ggplot2::theme(legend.position = "bottom")
+    .qc_theme()
   if (isTRUE(show_points)) {
     p <- p + ggplot2::geom_point(
       position = ggplot2::position_jitterdodge(
@@ -135,8 +134,8 @@ plot_flagged_taxa_reads <- function(result,
                                     measure = c("mean_per_sample", "total"),
                                     group_colors = c(
                                       total = "black",
-                                      biological = "steelblue",
-                                      control = "tomato"
+                                      biological = "tomato",
+                                      control = "steelblue"
                                     )) {
   measure <- match.arg(measure)
   group_colors <- .validate_group_colors(group_colors)
@@ -189,8 +188,7 @@ plot_flagged_taxa_reads <- function(result,
       fill = NULL,
       title = paste("Reads assigned to flagged", taxonomy, "at threshold", threshold)
     ) +
-    ggplot2::theme_bw() +
-    ggplot2::theme(legend.position = "bottom")
+    .qc_theme()
 }
 
 #' Plot taxon raw-read composition before and after decontamination
@@ -278,10 +276,5 @@ plot_taxa_reads_before_after <- function(ps,
       state ~ sample_group, scales = "free_x", space = "free_x"
     ) +
     ggplot2::labs(x = NULL, y = "Raw read count", fill = taxonomy) +
-    ggplot2::theme_bw() +
-    ggplot2::theme(
-      axis.text.x = ggplot2::element_blank(),
-      axis.ticks.x = ggplot2::element_blank(),
-      legend.position = "bottom"
-    )
+    .qc_theme()
 }

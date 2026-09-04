@@ -16,7 +16,7 @@ run_decontam_qc(
   top_n_flagged = 20L,
   top_n_composition = 15L,
   prevalence_pseudocount = 0.5,
-  group_colors = c(total = "black", biological = "steelblue", control = "tomato"),
+  group_colors = c(total = "black", biological = "tomato", control = "steelblue"),
   taxa_colors = NULL,
   progress = interactive()
 )

@@ -10,7 +10,7 @@ plot_flagged_taxa_reads(
   taxonomy = "Genus",
   top_n = 20L,
   measure = c("mean_per_sample", "total"),
-  group_colors = c(total = "black", biological = "steelblue", control = "tomato")
+  group_colors = c(total = "black", biological = "tomato", control = "steelblue")
 )
 }
 \arguments{

@@ -46,8 +46,8 @@ run_decontam_qc <- function(ps,
                             prevalence_pseudocount = 0.5,
                             group_colors = c(
                               total = "black",
-                              biological = "steelblue",
-                              control = "tomato"
+                              biological = "tomato",
+                              control = "steelblue"
                             ),
                             taxa_colors = NULL,
                             progress = interactive()) {

@@ -63,6 +63,19 @@
   grDevices::colorRampPalette(combined)(n)
 }
 
+.qc_theme <- function() {
+  ggplot2::theme_bw() +
+    ggplot2::theme(
+      panel.border = ggplot2::element_blank(),
+      axis.line = ggplot2::element_line(),
+      panel.grid.major = ggplot2::element_line(linewidth = 0.2),
+      panel.grid.minor = ggplot2::element_line(linewidth = 0.1),
+      text = ggplot2::element_text(size = 12),
+      legend.position = "bottom",
+      axis.text.x = ggplot2::element_text(angle = 30, hjust = 1, vjust = 1)
+    )
+}
+
 .threshold_index <- function(result, threshold) {
   if (!inherits(result, "decontam_sensitivity")) {
     stop("`result` must be returned by `run_threshold_sweep()`.", call. = FALSE)

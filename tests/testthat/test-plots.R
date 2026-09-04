@@ -11,7 +11,7 @@ test_that("standard group colors and taxon palettes are applied", {
   color_scale <- p$scales$get_scales("colour")
   expect_equal(
     unname(color_scale$palette(3)),
-    c("black", "steelblue", "tomato")
+    c("black", "tomato", "steelblue")
   )
   expect_length(decontamSensitivity:::.taxa_palette(9), 9)
   expect_length(decontamSensitivity:::.taxa_palette(12), 12)

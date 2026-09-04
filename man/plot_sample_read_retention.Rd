@@ -7,7 +7,7 @@
 plot_sample_read_retention(
   result,
   show_points = TRUE,
-  group_colors = c(total = "black", biological = "steelblue", control = "tomato")
+  group_colors = c(total = "black", biological = "tomato", control = "steelblue")
 )
 }
 \arguments{

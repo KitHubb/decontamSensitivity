@@ -7,7 +7,7 @@
 plot_threshold_sensitivity(
   result,
   metric = c("both", "reads", "features"),
-  group_colors = c(total = "black", biological = "steelblue", control = "tomato")
+  group_colors = c(total = "black", biological = "tomato", control = "steelblue")
 )
 }
 \arguments{
