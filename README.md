@@ -30,6 +30,9 @@ declared as dependencies.
 
 `run_decontam_qc()` runs the complete workflow for every value supplied to
 `thresholds`. A selected or optimal threshold is not chosen automatically.
+The integrated phyloseq runner currently fits the `decontam` **prevalence**
+method. Frequency scores can still be compared with the lower-level workflow
+shown under [Other Functions](#compare-frequency-method-thresholds).
 
 The input must be a `phyloseq` object with a sample-data column that identifies
 negative controls. OTU tables in either `taxa × samples` or `samples × taxa`
@@ -191,6 +194,54 @@ result <- run_threshold_sweep(
 )
 ```
 
+### Compare frequency-method thresholds
+
+Threshold sensitivity is also useful for the `decontam` frequency method. The
+frequency model uses sample DNA concentration rather than negative-control
+prevalence. First calculate detailed frequency scores with `decontam`, then
+pass those scores to `run_threshold_sweep()`:
+
+```r
+frequency_scores <- decontam::isContaminant(
+  ps,
+  method = "frequency",
+  conc = "DNA_concentration",
+  threshold = 0.5,
+  detailed = TRUE
+)
+
+frequency_result <- run_threshold_sweep(
+  decontam_result = frequency_scores,
+  count_table = as(phyloseq::otu_table(ps), "matrix"),
+  metadata = as(phyloseq::sample_data(ps), "data.frame"),
+  control_column = "sample_type",
+  control_label = "control",
+  thresholds = seq(0.1, 0.9, by = 0.1),
+  taxonomy = as(phyloseq::tax_table(ps), "matrix"),
+  score_column = "p"
+)
+
+frequency_result$threshold_summary
+plot_threshold_sensitivity(frequency_result)
+plot_sample_read_retention(frequency_result)
+summarize_flagged_taxa(
+  frequency_result,
+  threshold = 0.5,
+  taxonomy = "Genus"
+)
+```
+
+`DNA_concentration` must be a positive numeric sample-data column. Although
+the frequency model itself does not use negative controls, the current
+`run_threshold_sweep()` interface still requires `control_column` and
+`control_label` so that retention can be summarized separately for biological
+samples and controls. Both groups must be present.
+
+For frequency results, threshold, read-retention, sample-retention, flagged-taxa,
+and before/after plots remain applicable. Control-prevalence enrichment is a
+separate descriptive comparison and should not be interpreted as evidence used
+by the frequency model.
+
 ## Interpretation
 
 The package is a sensitivity diagnostic, not a threshold optimizer. Interpret
@@ -208,6 +259,12 @@ the outputs together rather than selecting a threshold from one plot alone.
   composition.
 - `flagged_taxa` and `flagged_features`: review the identities and biological
   read counts of removed features at every candidate threshold.
+
+For the frequency method, also confirm that the concentration measurements are
+reliable and cover a useful range. Features with decreasing abundance as total
+DNA concentration increases are more consistent with the frequency-model
+contamination pattern. Negative-control enrichment can support interpretation,
+but it is not the quantity used to fit the frequency model.
 
 A conservative threshold typically depletes control-associated signal while
 preserving biological reads, samples, and plausible taxa. The final choice
