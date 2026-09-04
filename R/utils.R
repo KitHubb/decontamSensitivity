@@ -41,6 +41,28 @@
   ifelse(denominator == 0, NA_real_, 100 * numerator / denominator)
 }
 
+.validate_group_colors <- function(group_colors) {
+  required <- c("total", "biological", "control")
+  if (!is.character(group_colors) || is.null(names(group_colors)) ||
+      !all(required %in% names(group_colors)) ||
+      anyNA(group_colors[required]) || any(!nzchar(group_colors[required]))) {
+    stop("`group_colors` must be a named character vector containing `total`, `biological`, and `control`.",
+         call. = FALSE)
+  }
+  group_colors[required]
+}
+
+.taxa_palette <- function(n) {
+  if (n < 1L) return(character())
+  paired <- RColorBrewer::brewer.pal(12L, "Paired")
+  set1 <- RColorBrewer::brewer.pal(9L, "Set1")
+  if (n <= 9L) return(paired[seq_len(n)])
+  if (n <= 12L) return(grDevices::colorRampPalette(set1)(n))
+  combined <- c(paired, set1)
+  if (n <= 21L) return(combined[seq_len(n)])
+  grDevices::colorRampPalette(combined)(n)
+}
+
 .threshold_index <- function(result, threshold) {
   if (!inherits(result, "decontam_sensitivity")) {
     stop("`result` must be returned by `run_threshold_sweep()`.", call. = FALSE)

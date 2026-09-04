@@ -12,7 +12,8 @@ plot_taxa_reads_before_after(
   control_label,
   taxonomy = "Genus",
   top_n = 15L,
-  other_label = "Other"
+  other_label = "Other",
+  taxa_colors = NULL
 )
 }
 \arguments{
@@ -32,6 +33,10 @@ plot_taxa_reads_before_after(
 \item{top_n}{Number of most abundant taxa to display individually.}
 
 \item{other_label}{Label used for all remaining taxa.}
+
+\item{taxa_colors}{Optional colors for taxa. When \code{NULL}, up to 9 taxa use
+RColorBrewer \code{Paired}, up to 12 use \code{Set1}, and up to 21 use
+\code{Paired} followed by \code{Set1}.}
 }
 \value{
 A faceted sample-level raw-read stacked-bar ggplot.

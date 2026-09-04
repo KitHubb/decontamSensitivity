@@ -61,12 +61,19 @@ plot_prevalence_enrichment <- function(ps,
 #'
 #' @inheritParams summarize_read_retention
 #' @param show_points Logical; overlay individual samples.
+#' @param group_colors Named colors for `total`, `biological`, and `control`.
 #' @return A ggplot object.
 #' @export
-plot_sample_read_retention <- function(result, show_points = TRUE) {
+plot_sample_read_retention <- function(
+    result,
+    show_points = TRUE,
+    group_colors = c(
+      total = "black", biological = "steelblue", control = "tomato"
+    )) {
   if (!inherits(result, "decontam_sensitivity")) {
     stop("`result` must be returned by `run_threshold_sweep()`.", call. = FALSE)
   }
+  group_colors <- .validate_group_colors(group_colors)
   plot_data <- result$sample_retention
   plot_data$threshold_label <- factor(
     format(plot_data$threshold, trim = TRUE, scientific = FALSE),
@@ -79,10 +86,20 @@ plot_sample_read_retention <- function(result, show_points = TRUE) {
   )
   p <- ggplot2::ggplot(
     plot_data,
-    ggplot2::aes(x = threshold_label, y = reads_retained_pct, fill = group)
+    ggplot2::aes(
+      x = threshold_label, y = reads_retained_pct, fill = group, color = group
+    )
   ) +
     ggplot2::geom_boxplot(outlier.shape = NA, alpha = 0.75) +
     ggplot2::scale_y_continuous(limits = c(0, 100), breaks = seq(0, 100, 20)) +
+    ggplot2::scale_fill_manual(values = c(
+      "Biological samples" = unname(group_colors["biological"]),
+      "Negative controls" = unname(group_colors["control"])
+    )) +
+    ggplot2::scale_color_manual(values = c(
+      "Biological samples" = unname(group_colors["biological"]),
+      "Negative controls" = unname(group_colors["control"])
+    ), guide = "none") +
     ggplot2::labs(
       x = "decontam threshold",
       y = "Reads retained per sample (%)",
@@ -108,14 +125,21 @@ plot_sample_read_retention <- function(result, show_points = TRUE) {
 #' @param top_n Maximum number of taxa to display.
 #' @param measure Either `"mean_per_sample"` (recommended when groups contain
 #'   different sample counts) or `"total"`.
+#' @param group_colors Named colors for `total`, `biological`, and `control`.
 #' @return A ggplot object comparing biological samples and controls.
 #' @export
 plot_flagged_taxa_reads <- function(result,
                                     threshold,
                                     taxonomy = "Genus",
                                     top_n = 20L,
-                                    measure = c("mean_per_sample", "total")) {
+                                    measure = c("mean_per_sample", "total"),
+                                    group_colors = c(
+                                      total = "black",
+                                      biological = "steelblue",
+                                      control = "tomato"
+                                    )) {
   measure <- match.arg(measure)
+  group_colors <- .validate_group_colors(group_colors)
   if (!is.numeric(top_n) || length(top_n) != 1L || is.na(top_n) || top_n < 1) {
     stop("`top_n` must be one positive number.", call. = FALSE)
   }
@@ -154,6 +178,10 @@ plot_flagged_taxa_reads <- function(result,
     ggplot2::aes(x = taxon, y = reads, fill = group)
   ) +
     ggplot2::geom_col(position = "dodge") +
+    ggplot2::scale_fill_manual(values = c(
+      "Biological samples" = unname(group_colors["biological"]),
+      "Negative controls" = unname(group_colors["control"])
+    )) +
     ggplot2::coord_flip() +
     ggplot2::labs(
       x = taxonomy,
@@ -172,6 +200,9 @@ plot_flagged_taxa_reads <- function(result,
 #' @inheritParams split_phyloseq_groups
 #' @param top_n Number of most abundant taxa to display individually.
 #' @param other_label Label used for all remaining taxa.
+#' @param taxa_colors Optional colors for taxa. When `NULL`, up to 9 taxa use
+#'   RColorBrewer `Paired`, up to 12 use `Set1`, and up to 21 use
+#'   `Paired` followed by `Set1`.
 #' @return A faceted sample-level raw-read stacked-bar ggplot.
 #' @export
 plot_taxa_reads_before_after <- function(ps,
@@ -181,7 +212,8 @@ plot_taxa_reads_before_after <- function(ps,
                                          control_label,
                                          taxonomy = "Genus",
                                          top_n = 15L,
-                                         other_label = "Other") {
+                                         other_label = "Other",
+                                         taxa_colors = NULL) {
   group_info <- .phyloseq_group_info(ps, control_column, control_label)
   .assert_scalar_character(taxonomy, "taxonomy")
   if (!taxonomy %in% phyloseq::rank_names(ps)) {
@@ -212,6 +244,21 @@ plot_taxa_reads_before_after <- function(ps,
   plot_data$taxon_plot <- ifelse(
     plot_data$taxon %in% top_taxa, plot_data$taxon, other_label
   )
+  taxa_levels <- c(top_taxa, if (any(plot_data$taxon_plot == other_label)) other_label)
+  plot_data$taxon_plot <- factor(plot_data$taxon_plot, levels = taxa_levels)
+  if (is.null(taxa_colors)) {
+    taxa_colors <- stats::setNames(.taxa_palette(length(taxa_levels)), taxa_levels)
+  } else {
+    if (!is.character(taxa_colors) || length(taxa_colors) < length(taxa_levels)) {
+      stop("`taxa_colors` must provide at least one color per displayed taxon.",
+           call. = FALSE)
+    }
+    if (is.null(names(taxa_colors))) names(taxa_colors) <- taxa_levels
+    if (!all(taxa_levels %in% names(taxa_colors))) {
+      stop("Named `taxa_colors` must include every displayed taxon.", call. = FALSE)
+    }
+    taxa_colors <- taxa_colors[taxa_levels]
+  }
   plot_data$state <- factor(
     plot_data$state, levels = c(before_label, after_label)
   )
@@ -226,6 +273,7 @@ plot_taxa_reads_before_after <- function(ps,
     ggplot2::aes(x = Sample, y = Abundance, fill = taxon_plot)
   ) +
     ggplot2::geom_col(width = 1) +
+    ggplot2::scale_fill_manual(values = taxa_colors, drop = FALSE) +
     ggplot2::facet_grid(
       state ~ sample_group, scales = "free_x", space = "free_x"
     ) +

@@ -4,12 +4,18 @@
 \alias{plot_sample_read_retention}
 \title{Plot sample-level read retention as boxplots}
 \usage{
-plot_sample_read_retention(result, show_points = TRUE)
+plot_sample_read_retention(
+  result,
+  show_points = TRUE,
+  group_colors = c(total = "black", biological = "steelblue", control = "tomato")
+)
 }
 \arguments{
 \item{result}{A result from \code{\link[=run_threshold_sweep]{run_threshold_sweep()}}.}
 
 \item{show_points}{Logical; overlay individual samples.}
+
+\item{group_colors}{Named colors for \code{total}, \code{biological}, and \code{control}.}
 }
 \value{
 A ggplot object.

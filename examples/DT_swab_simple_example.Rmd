@@ -70,7 +70,12 @@ qc <- run_decontam_qc(
   control_column = "control_status",
   control_label = "control",
   thresholds = seq(0.1, 0.9, by = 0.1),
-  taxonomy = "Genus"
+  taxonomy = "Genus",
+  group_colors = c(
+    total = "black",
+    biological = "steelblue",
+    control = "tomato"
+  )
 )
 
 qc

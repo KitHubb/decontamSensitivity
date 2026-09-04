@@ -4,12 +4,18 @@
 \alias{plot_threshold_sensitivity}
 \title{Plot threshold sensitivity}
 \usage{
-plot_threshold_sensitivity(result, metric = c("both", "reads", "features"))
+plot_threshold_sensitivity(
+  result,
+  metric = c("both", "reads", "features"),
+  group_colors = c(total = "black", biological = "steelblue", control = "tomato")
+)
 }
 \arguments{
 \item{result}{A result from \code{\link[=run_threshold_sweep]{run_threshold_sweep()}}.}
 
 \item{metric}{One of \code{"both"}, \code{"reads"}, or \code{"features"}.}
+
+\item{group_colors}{Named colors for \code{total}, \code{biological}, and \code{control}.}
 }
 \value{
 A \code{ggplot} object.

@@ -12,6 +12,9 @@
 #' @param top_n_composition Number of taxa shown individually in each
 #'   before/after composition plot.
 #' @param prevalence_pseudocount Correction used in prevalence enrichment ratios.
+#' @param group_colors Named colors for `total`, `biological`, and `control`.
+#' @param taxa_colors Optional named colors for taxa. `NULL` applies the
+#'   automatic RColorBrewer palette rule.
 #' @param progress Logical; display one updating `cli` progress bar. The default
 #'   is `TRUE` in interactive sessions and `FALSE` during non-interactive
 #'   execution such as R Markdown rendering and automated tests.
@@ -41,8 +44,15 @@ run_decontam_qc <- function(ps,
                             top_n_flagged = 20L,
                             top_n_composition = 15L,
                             prevalence_pseudocount = 0.5,
+                            group_colors = c(
+                              total = "black",
+                              biological = "steelblue",
+                              control = "tomato"
+                            ),
+                            taxa_colors = NULL,
                             progress = interactive()) {
   thresholds <- .validate_thresholds(thresholds)
+  group_colors <- .validate_group_colors(group_colors)
   if (!is.logical(progress) || length(progress) != 1L || is.na(progress)) {
     stop("`progress` must be `TRUE` or `FALSE`.", call. = FALSE)
   }
@@ -132,7 +142,8 @@ run_decontam_qc <- function(ps,
       taxa_at_threshold <- summarize_flagged_taxa(result, threshold, taxonomy)
       out <- if (nrow(taxa_at_threshold)) {
         plot_flagged_taxa_reads(
-          result, threshold, taxonomy, top_n_flagged, measure = "mean_per_sample"
+          result, threshold, taxonomy, top_n_flagged,
+          measure = "mean_per_sample", group_colors = group_colors
         )
       } else NULL
       update_progress()
@@ -144,7 +155,7 @@ run_decontam_qc <- function(ps,
     lapply(thresholds, function(threshold) {
       out <- plot_taxa_reads_before_after(
         ps, result, threshold, control_column, control_label,
-        taxonomy, top_n_composition
+        taxonomy, top_n_composition, taxa_colors = taxa_colors
       )
       update_progress()
       out
@@ -153,8 +164,12 @@ run_decontam_qc <- function(ps,
   )
   plots <- list(
     score_distribution = plot_decontam_scores(result),
-    threshold_sensitivity = plot_threshold_sensitivity(result),
-    sample_retention = plot_sample_read_retention(result),
+    threshold_sensitivity = plot_threshold_sensitivity(
+      result, group_colors = group_colors
+    ),
+    sample_retention = plot_sample_read_retention(
+      result, group_colors = group_colors
+    ),
     prevalence_enrichment = plot_prevalence_enrichment(
       ps, control_column, control_label, prevalence_unit = "count", pseudocount = 0
     ),

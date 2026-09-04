@@ -9,7 +9,8 @@ plot_flagged_taxa_reads(
   threshold,
   taxonomy = "Genus",
   top_n = 20L,
-  measure = c("mean_per_sample", "total")
+  measure = c("mean_per_sample", "total"),
+  group_colors = c(total = "black", biological = "steelblue", control = "tomato")
 )
 }
 \arguments{
@@ -24,6 +25,8 @@ plot_flagged_taxa_reads(
 
 \item{measure}{Either \code{"mean_per_sample"} (recommended when groups contain
 different sample counts) or \code{"total"}.}
+
+\item{group_colors}{Named colors for \code{total}, \code{biological}, and \code{control}.}
 }
 \value{
 A ggplot object comparing biological samples and controls.

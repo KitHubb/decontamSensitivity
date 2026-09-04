@@ -16,6 +16,8 @@ run_decontam_qc(
   top_n_flagged = 20L,
   top_n_composition = 15L,
   prevalence_pseudocount = 0.5,
+  group_colors = c(total = "black", biological = "steelblue", control = "tomato"),
+  taxa_colors = NULL,
   progress = interactive()
 )
 }
@@ -42,6 +44,11 @@ run_decontam_qc(
 before/after composition plot.}
 
 \item{prevalence_pseudocount}{Correction used in prevalence enrichment ratios.}
+
+\item{group_colors}{Named colors for \code{total}, \code{biological}, and \code{control}.}
+
+\item{taxa_colors}{Optional named colors for taxa. \code{NULL} applies the
+automatic RColorBrewer palette rule.}
 
 \item{progress}{Logical; display one updating \code{cli} progress bar. The default
 is \code{TRUE} in interactive sessions and \code{FALSE} during non-interactive

@@ -2,14 +2,21 @@
 #'
 #' @inheritParams summarize_read_retention
 #' @param metric One of `"both"`, `"reads"`, or `"features"`.
+#' @param group_colors Named colors for `total`, `biological`, and `control`.
 #' @return A `ggplot` object.
 #' @export
 plot_threshold_sensitivity <- function(result,
-                                       metric = c("both", "reads", "features")) {
+                                       metric = c("both", "reads", "features"),
+                                       group_colors = c(
+                                         total = "black",
+                                         biological = "steelblue",
+                                         control = "tomato"
+                                       )) {
   if (!inherits(result, "decontam_sensitivity")) {
     stop("`result` must be returned by `run_threshold_sweep()`.", call. = FALSE)
   }
   metric <- match.arg(metric)
+  group_colors <- .validate_group_colors(group_colors)
   reads <- result$read_retention[, c("threshold", "group", "reads_retained_pct")]
   names(reads)[3L] <- "retained_pct"
   reads$metric <- "Reads retained (%)"
@@ -32,6 +39,11 @@ plot_threshold_sensitivity <- function(result,
   ) +
     ggplot2::geom_line(linewidth = 0.8) +
     ggplot2::geom_point(size = 2.5) +
+    ggplot2::scale_color_manual(values = c(
+      "All samples" = unname(group_colors["total"]),
+      "Biological samples" = unname(group_colors["biological"]),
+      "Negative controls" = unname(group_colors["control"])
+    )) +
     ggplot2::scale_y_continuous(limits = c(0, 100), breaks = seq(0, 100, 20)) +
     ggplot2::scale_x_continuous(breaks = result$thresholds) +
     ggplot2::labs(x = "decontam threshold", y = NULL, color = NULL, shape = NULL) +
