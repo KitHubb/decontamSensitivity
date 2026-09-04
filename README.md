@@ -6,9 +6,6 @@ prevalence thresholds affect microbiome data. It reports read, feature, and
 sample retention; summarizes flagged taxa; and creates threshold-specific QC
 plots without automatically selecting an optimal threshold.
 
-No study data or study-specific analysis files are distributed in this
-repository.
-
 ## Installation
 
 Install the latest GitHub version with
@@ -277,9 +274,6 @@ The workflow was used for threshold-sensitivity assessment in a published skin
 microbiome analysis:
 
 [Scientific Reports (2026), threshold sensitivity analysis](https://www.nature.com/articles/s41598-026-62903-7#Sec17)
-
-The repository contains only reusable package code. It does not distribute the
-study dataset or study-specific analysis report.
 
 ## Citation
 
