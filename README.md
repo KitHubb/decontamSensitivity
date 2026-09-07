@@ -24,7 +24,7 @@ Install the latest version from GitHub:
 
 ```r
 install.packages("pak") # Skip this if pak is already installed
-pak::pak("KitHubb/decontamSensitivity?reinstall")
+pak::pak("KitHubb/decontamSensitivity")
 
 library(decontamSensitivity)
 ```
