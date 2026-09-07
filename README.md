@@ -4,6 +4,20 @@
 microbiome data. It summarizes retained reads and features, highlights flagged
 taxa, and creates ready-to-use QC plots.
 
+## Why decontamSensitivity?
+
+Choosing a `decontam` threshold can be challenging, especially in low-biomass microbiome studies where aggressive contaminant removal may also remove biological signals.
+
+`decontamSensitivity` helps evaluate this trade-off across multiple thresholds by asking:
+
+- How many reads and features are retained in biological samples?
+- How strongly are reads and features reduced in negative controls?
+- Which taxa are affected as the threshold changes?
+
+Rather than selecting an “optimal” threshold automatically, the package provides quantitative evidence to support threshold selection based on your controls, expected biology, and study design.
+
+
+
 ## Installation
 
 Install the latest version from GitHub:
