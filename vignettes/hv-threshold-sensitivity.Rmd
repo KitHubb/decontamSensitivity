@@ -271,6 +271,41 @@ before_after_long$sample <- unname(sample_key[before_after_long$sample])
 # Use a fixed read scale when stable panel geometry is required.
 ```
 
+## Frequency method
+
+Threshold summaries and retention plots can also be used with frequency
+scores. The frequency model uses sample DNA concentration rather than negative
+control prevalence.
+
+```{r frequency-method, eval=FALSE}
+frequency_scores <- decontam::isContaminant(
+  ps,
+  method = "frequency",
+  conc = "DNA_concentration",
+  detailed = TRUE
+)
+
+frequency_result <- run_threshold_sweep(
+  decontam_result = frequency_scores,
+  count_table = as(phyloseq::otu_table(ps), "matrix"),
+  metadata = as(phyloseq::sample_data(ps), "data.frame"),
+  control_column = "T.C",
+  control_label = "Control",
+  thresholds = seq(0.1, 0.9, by = 0.1),
+  taxonomy = as(phyloseq::tax_table(ps), "matrix"),
+  score_column = "p"
+)
+
+frequency_result$threshold_summary
+plot_threshold_sensitivity(frequency_result)
+plot_sample_read_retention(frequency_result)
+```
+
+`DNA_concentration` must be a positive numeric column in `sample_data(ps)`.
+Control labels are still supplied so retention can be summarized separately
+for biological samples and controls. The prevalence-enrichment plot is useful
+context, but it is not part of the frequency model.
+
 ## Interpretation
 
 The sensitivity plots should be interpreted together. A useful threshold

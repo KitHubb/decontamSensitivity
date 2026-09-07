@@ -1,12 +1,12 @@
 # decontamSensitivity
 
-`decontamSensitivity` shows how different `decontam` thresholds change your
-microbiome data. It summarizes retained reads and features, highlights flagged
-taxa, and creates ready-to-use QC plots.
+`decontamSensitivity` provides QC summaries and plots for comparing
+`decontam` thresholds in microbiome data.
 
 ## Why decontamSensitivity?
 
-Choosing a `decontam` threshold can be challenging, especially in low-biomass microbiome studies where aggressive contaminant removal may also remove biological signals.
+Choosing a `decontam` threshold can be difficult in low-biomass studies because
+contaminant removal may also remove biological signal.
 
 `decontamSensitivity` helps evaluate this trade-off across multiple thresholds by asking:
 
@@ -14,9 +14,8 @@ Choosing a `decontam` threshold can be challenging, especially in low-biomass mi
 - How strongly are reads and features reduced in negative controls?
 - Which taxa are affected as the threshold changes?
 
-Rather than selecting an “optimal” threshold automatically, the package provides quantitative evidence to support threshold selection based on your controls, expected biology, and study design.
-
-
+The package does not choose an “optimal” threshold. It provides evidence for a
+choice based on the controls, expected biology, and study design.
 
 ## Installation
 
@@ -33,6 +32,10 @@ library(decontamSensitivity)
 
 Run the full prevalence-based workflow with one function:
 
+`ps` must be a `phyloseq` object containing an OTU table and sample metadata.
+The metadata column supplied to `control_column` must identify the negative
+controls. OTU tables work in either orientation.
+
 ```r
 qc <- run_decontam_qc(
   ps = ps,
@@ -47,8 +50,6 @@ qc <- run_decontam_qc(
   )
 )
 ```
-
-The input is a `phyloseq` object. OTU tables work in either orientation.
 
 ```r
 # Summary tables
@@ -126,34 +127,10 @@ ratios.
 
 ### Frequency method
 
-Threshold summaries and retention plots also work with frequency scores.
-Calculate the scores with `decontam`, then pass them to
-`run_threshold_sweep()`.
-
-```r
-frequency_scores <- decontam::isContaminant(
-  ps,
-  method = "frequency",
-  conc = "DNA_concentration",
-  detailed = TRUE
-)
-
-frequency_result <- run_threshold_sweep(
-  decontam_result = frequency_scores,
-  count_table = as(phyloseq::otu_table(ps), "matrix"),
-  metadata = as(phyloseq::sample_data(ps), "data.frame"),
-  control_column = "sample_type",
-  control_label = "control",
-  thresholds = seq(0.1, 0.9, by = 0.1),
-  taxonomy = as(phyloseq::tax_table(ps), "matrix"),
-  score_column = "p"
-)
-
-plot_threshold_sensitivity(frequency_result)
-```
-
-The frequency model uses DNA concentration, not control prevalence. Treat the
-prevalence-enrichment plot as extra context for this method.
+Threshold summaries and retention plots also work with frequency scores. See
+the [frequency-method example](vignettes/hv-threshold-sensitivity.Rmd#frequency-method)
+for the full workflow. The frequency model uses DNA concentration rather than
+control prevalence.
 
 ## Interpretation
 
@@ -171,8 +148,7 @@ controls, expected biology, and downstream analysis.
 
 ## Published use case
 
-These plots come from a published healthy-volunteer skin microbiome study:
-[Scientific Reports (2026)](https://www.nature.com/articles/s41598-026-62903-7#Sec17).
+These plots come from a published healthy-volunteer skin microbiome study.
 
 ### QC overview
 
@@ -220,7 +196,7 @@ qc_figure
 
 ![Taxa composition before and after filtering](man/figures/hv_taxa_reads_before_after_by_threshold.gif)
 
-More details: [HV case study](vignettes/hv-threshold-sensitivity.Rmd).
+More details: [published HV case study](https://www.nature.com/articles/s41598-026-62903-7).
 
 ## Citation
 
@@ -233,5 +209,4 @@ Please cite `decontam`, which provides the contaminant-identification method:
 
 ```r
 citation("decontam")
-citation("decontamSensitivity")
 ```
