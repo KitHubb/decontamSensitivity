@@ -140,16 +140,6 @@ These plots come from a published healthy-volunteer skin microbiome study.
 
 ![HV decontam QC overview](man/figures/hv_qc_overview.png)
 
-### How the threshold was chosen
-
-In this study, only three negative controls were available, so the threshold
-was interpreted cautiously rather than selected from a single metric.
-Thresholds of 0.1–0.3 produced similar overall results, whereas filtering at
-0.4 removed *Cutibacterium*, a common member of the skin microbiome. We
-therefore considered 0.1–0.3 to be a reasonable range. A threshold of 0.1 was
-selected because it gave results comparable to 0.3 while taking the more
-conservative approach of preserving as much biological signal as possible.
-
 The package plots can be combined into one figure with `patchwork`:
 
 ```r
@@ -173,6 +163,16 @@ qc_figure <-
 
 qc_figure
 ```
+
+### How the threshold was chosen
+
+In this study, only three negative controls were available, so the threshold
+was interpreted cautiously rather than selected from a single metric.
+Thresholds of 0.1–0.3 produced similar overall results, whereas filtering at
+0.4 removed *Cutibacterium*, a common member of the skin microbiome. We
+therefore considered 0.1–0.3 to be a reasonable range. A threshold of 0.1 was
+selected because it gave results comparable to 0.3 while taking the more
+conservative approach of preserving as much biological signal as possible.
 
 ### Threshold sensitivity
 
