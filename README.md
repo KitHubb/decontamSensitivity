@@ -132,20 +132,6 @@ the [frequency-method example](vignettes/hv-threshold-sensitivity.Rmd#frequency-
 for the full workflow. The frequency model uses DNA concentration rather than
 control prevalence.
 
-## Interpretation
-
-- `threshold_sensitivity`: look for control-associated reads to fall while
-  biological reads remain stable.
-- `sample_retention`: make sure a few heavily affected samples are not driving
-  the overall result.
-- `flagged_taxa_reads_by_threshold`: check whether flagged taxa are mainly
-  found in controls.
-- `taxa_reads_before_after_by_threshold`: look for unexpected changes in the
-  biological community.
-
-There is no single best threshold for every dataset. Choose one that fits your
-controls, expected biology, and downstream analysis.
-
 ## Published use case
 
 These plots come from a published healthy-volunteer skin microbiome study.
@@ -153,6 +139,16 @@ These plots come from a published healthy-volunteer skin microbiome study.
 ### QC overview
 
 ![HV decontam QC overview](man/figures/hv_qc_overview.png)
+
+### How the threshold was chosen
+
+In this study, only three negative controls were available, so the threshold
+was interpreted cautiously rather than selected from a single metric.
+Thresholds of 0.1–0.3 produced similar overall results, whereas filtering at
+0.4 removed *Cutibacterium*, a common member of the skin microbiome. We
+therefore considered 0.1–0.3 to be a reasonable range. A threshold of 0.1 was
+selected because it gave results comparable to 0.3 while taking the more
+conservative approach of preserving as much biological signal as possible.
 
 The package plots can be combined into one figure with `patchwork`:
 
