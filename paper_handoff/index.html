@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>decontamSensitivity 피부 마이크로바이옴 연구 handoff</title>
+  <style>
+    :root { --navy:#17324d; --blue:#0072b2; --orange:#d55e00; --green:#009e73; --paper:#f6f7f9; }
+    * { box-sizing: border-box; }
+    body { margin:0; color:#20252b; background:var(--paper); font-family:"Malgun Gothic","Apple SD Gothic Neo",sans-serif; line-height:1.65; }
+    header { padding:48px max(6vw,24px); color:white; background:linear-gradient(120deg,#17324d,#245b75); }
+    header h1 { margin:0 0 8px; font-size:clamp(28px,4vw,48px); }
+    header p { max-width:960px; margin:0; opacity:.9; }
+    main { max-width:1400px; margin:auto; padding:32px 24px 80px; }
+    h2 { margin-top:44px; color:var(--navy); border-bottom:2px solid #d8e0e6; padding-bottom:8px; }
+    h3 { color:var(--navy); }
+    .decision { background:white; border-left:8px solid var(--green); padding:20px 24px; border-radius:8px; box-shadow:0 4px 18px #17324d12; }
+    .decision strong { color:#006b50; }
+    .metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-top:18px; }
+    .metric { background:#eef7f3; padding:14px; border-radius:8px; }
+    .metric b { display:block; font-size:24px; color:#006b50; }
+    .reports, .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:18px; }
+    .card { background:white; border-radius:10px; padding:16px; box-shadow:0 4px 18px #17324d12; }
+    .card img { width:100%; max-height:270px; object-fit:contain; background:white; border:1px solid #e1e5e8; }
+    .card h3 { margin:12px 0 6px; }
+    .card p { margin:6px 0; }
+    .button { display:inline-block; margin:6px 6px 0 0; padding:8px 12px; border-radius:6px; text-decoration:none; color:white; background:var(--blue); }
+    .button.alt { background:var(--navy); }
+    table { width:100%; border-collapse:collapse; background:white; }
+    th,td { text-align:left; padding:10px; border-bottom:1px solid #dfe5e9; vertical-align:top; }
+    th { color:white; background:var(--navy); }
+    code { background:#e9edf0; padding:2px 5px; border-radius:4px; }
+    .note { background:#fff4e8; border-left:5px solid var(--orange); padding:14px 18px; }
+    footer { margin-top:54px; color:#5d6871; font-size:14px; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>피부 마이크로바이옴 오염 제거 전략</h1>
+  <p>Batch, negative control, decontam method와 threshold를 비교해 control 신호를 줄이면서 피부 유래 신호를 보존하는 조건을 선택한 분석 handoff입니다. PPT 제작 시 아래 순서와 원본 PNG를 그대로 사용할 수 있습니다.</p>
+</header>
+<main>
+  <section class="decision">
+    <h2 style="margin-top:0">최종 의사결정</h2>
+    <p><strong>피부 시료 최종 조건:</strong> Prep control + Air Swab · Cycle batch aware · Frequency · threshold 0.4</p>
+    <p><strong>Mock 검증 조건:</strong> DNA extraction 단계를 평가하므로 Prep control only</p>
+    <div class="metrics">
+      <div class="metric"><b>83.5%</b>True reads retained</div>
+      <div class="metric"><b>54.1%</b>Combined controls removed</div>
+      <div class="metric"><b>0.4</b>Selected frequency threshold</div>
+      <div class="metric"><b>0.5</b>Over-removal risk boundary</div>
+    </div>
+    <p>Frequency 0.4에서 상재균 감소율은 Cutibacterium 6.5%, Corynebacterium 0.8%, Lawsonella 0%였고, 대표 control taxa 감소율은 Lepagella 94.5%, Lactobacillus 86.6%, Duncaniella 61.1%였습니다.</p>
+  </section>
+
+  <h2>전체 HTML 보고서</h2>
+  <div class="reports">
+    <div class="card"><h3>02 Basic analysis</h3><p>Read depth, taxonomy, heatmap, PCoA와 Cycle 구조</p><a class="button" href="reports/02_basic_analysis.html">보고서 열기</a></div>
+    <div class="card"><h3>03 Decontamination</h3><p>Control·batch·method·threshold 비교와 최종 조건</p><a class="button" href="reports/03_decontamination.html">보고서 열기</a></div>
+    <div class="card"><h3>04 Mock validation</h3><p>Cell/DNA mock, dilution candidate와 overlap 검증</p><a class="button" href="reports/04_MockCommunuty_validation.html">보고서 열기</a></div>
+  </div>
+
+  <h2>PPT 권장 구성</h2>
+  <table>
+    <thead><tr><th>Slide</th><th>제목</th><th>핵심 메시지</th><th>권장 그림</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>Background</td><td>피부는 low biomass이므로 control 정의와 threshold가 결과에 직접 영향을 준다.</td><td>연구 디자인 도식은 별도 제작</td></tr>
+      <tr><td>2</td><td>Dataset overview</td><td>True, NC, PC와 DNA extraction Cycle의 기본 구조를 제시한다.</td><td>Library size, PCoA</td></tr>
+      <tr><td>3</td><td>Batch versus pooled</td><td>Cycle을 반영했을 때 control 관련 신호의 검출 양상이 달라진다.</td><td>Pooled vs Cycle aware</td></tr>
+      <tr><td>4</td><td>Threshold sensitivity</td><td>0.5는 최적점이 아니라 True sample 과제거가 뚜렷해지는 경계다.</td><td>Sensitivity curve, tradeoff</td></tr>
+      <tr><td>5</td><td>Method comparison</td><td>Prevalence와 Frequency는 서로 대체 가능하지 않으며 method-specific ASV가 존재한다.</td><td>Overlap plots</td></tr>
+      <tr><td>6</td><td>Biological retention</td><td>전체 read와 함께 피부 상재균 및 control taxa 감소율을 평가해야 한다.</td><td>True retention and taxa reduction</td></tr>
+      <tr><td>7</td><td>Mock validation</td><td>Cell mock dilution은 low biomass에서 증가하는 background signal을 보조 검증한다.</td><td>Dilution candidates, overlap</td></tr>
+      <tr><td>8</td><td>Final strategy</td><td>Combined NC + Cycle aware + Frequency 0.4를 최종 조건으로 선택한다.</td><td>Slide 6 그림과 의사결정 표</td></tr>
+    </tbody>
+  </table>
+
+  <h2>핵심 그림</h2>
+  <div class="grid">
+    <article class="card"><img src="figures/02_library_size.png" alt="Library size"><h3>Sample library size</h3><p>슬라이드 2. 시료 유형별 sequencing depth 확인.</p><a class="button" href="figures/02_library_size.png">PNG 원본</a></article>
+    <article class="card"><img src="figures/02_PCoA_density.png" alt="PCoA"><h3>PCoA and density</h3><p>슬라이드 2. Total, NC, PC와 True sample의 군집 구조 및 Cycle 확인.</p><a class="button" href="figures/02_PCoA_density.png">PNG 원본</a></article>
+    <article class="card"><img src="figures/02_heatmap_species_NC.png" alt="NC heatmap"><h3>Negative control heatmap</h3><p>슬라이드 2–3. NC taxa와 Cycle별 조성 차이.</p><a class="button" href="figures/02_heatmap_species_NC.png">PNG 원본</a></article>
+    <article class="card"><img src="figures/03_pooled_vs_cycle.png" alt="Pooled versus batch"><h3>Pooled versus Cycle aware</h3><p>슬라이드 3. Batch를 반영했을 때의 contaminant와 retention 변화.</p><a class="button" href="figures/03_pooled_vs_cycle.png">PNG 원본</a></article>
+    <article class="card"><img src="figures/03_threshold_sensitivity_curve.png" alt="Sensitivity curve"><h3>Threshold sensitivity</h3><p>슬라이드 4. Control 제거와 True sample 손실의 threshold별 변화.</p><a class="button" href="figures/03_threshold_sensitivity_curve.png">PNG 원본</a></article>
+    <article class="card"><img src="figures/03_threshold_tradeoff.png" alt="Threshold tradeoff"><h3>Control–True tradeoff</h3><p>슬라이드 4. Control depletion 대비 biological loss.</p><a class="button" href="figures/03_threshold_tradeoff.png">PNG 원본</a></article>
+    <article class="card"><img src="figures/03_prevalence_frequency_overlap.png" alt="Method overlap"><h3>Prevalence and Frequency overlap</h3><p>슬라이드 5. 두 방법의 공통 및 고유 contaminant ASV.</p><a class="button" href="figures/03_prevalence_frequency_overlap.png">PNG 원본</a></article>
+    <article class="card"><img src="figures/03_true_retention_and_commensal_reduction.png" alt="Taxon retention"><h3>True retention and selected taxa</h3><p>슬라이드 6 및 8. 최종 threshold 결정의 핵심 근거.</p><a class="button" href="figures/03_true_retention_and_commensal_reduction.png">PNG 원본</a></article>
+    <article class="card"><img src="figures/04_cell_mix_dilution_candidate_contaminant_ASV.png" alt="Cell mix dilution"><h3>Cell mix dilution candidates</h3><p>슬라이드 7. 희석할수록 상대 조성이 증가하는 candidate contaminants.</p><a class="button" href="figures/04_cell_mix_dilution_candidate_contaminant_ASV.png">PNG 원본</a></article>
+    <article class="card"><img src="figures/04_cell_mix_decontam_overlap.png" alt="Mock overlap"><h3>Mock and decontam overlap</h3><p>슬라이드 7. Cell mix 후보와 batch aware decontam 후보의 교집합.</p><a class="button" href="figures/04_cell_mix_decontam_overlap.png">PNG 원본</a></article>
+    <article class="card"><img src="figures/04_contaminant_taxa_true_composition.png" alt="True sample composition"><h3>Flagged taxa in True samples</h3><p>보조 슬라이드. 오염 후보가 실제 피부 시료에서 차지하는 조성.</p><a class="button" href="figures/04_contaminant_taxa_true_composition.png">PNG 원본</a></article>
+    <article class="card"><img src="figures/04_cell_and_dna_mock_composition_threshold_0.1_0.9.png" alt="Mock taxonomy"><h3>Mock taxonomy across thresholds</h3><p>보조 슬라이드. Cell/DNA mock의 threshold별 taxonomy 변화.</p><a class="button" href="figures/04_cell_and_dna_mock_composition_threshold_0.1_0.9.png">PNG 원본</a></article>
+  </div>
+
+  <h2>핵심 결과표</h2>
+  <p>원자료 확인이나 PPT 수치 입력에는 <code>tables/</code> 폴더를 사용합니다.</p>
+  <ul>
+    <li><a href="tables/03_threshold_tradeoff_metrics.csv">Threshold별 retention 및 control depletion</a></li>
+    <li><a href="tables/03_pooled_vs_cycle.csv">Pooled와 Cycle aware 차이</a></li>
+    <li><a href="tables/03_method_overlap.csv">Prevalence와 Frequency overlap</a></li>
+    <li><a href="tables/03_selected_taxa_reduction_by_threshold.csv">상재균 및 대표 control taxa 감소율</a></li>
+    <li><a href="tables/03_selected_negative_control_genera.csv">선정된 representative control taxa</a></li>
+    <li><a href="tables/04_cell_mix_decontam_overlap_summary.csv">Cell mix와 decontam overlap</a></li>
+  </ul>
+
+  <div class="note">
+    <b>재현 관련 주의:</b> 원본 phyloseq RDS와 식별 가능한 metadata는 Git에 포함하지 않았습니다. HTML과 PNG는 집에서 바로 열 수 있지만 Rmd를 재실행하려면 <code>Phyloseq/phy_F270R210_260921.rds</code>를 별도로 전달해야 합니다.
+  </div>
+
+  <footer>
+    Generated for the decontamSensitivity skin microbiome study handoff · 2026-09-22
+  </footer>
+</main>
+</body>
+</html>

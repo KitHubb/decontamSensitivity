@@ -2,7 +2,7 @@
 % Please edit documentation in R/phyloseq.R
 \name{run_decontam_threshold_sweep}
 \alias{run_decontam_threshold_sweep}
-\title{Run a prevalence sweep directly from a phyloseq object}
+\title{Run a decontam threshold sweep directly from a phyloseq object}
 \usage{
 run_decontam_threshold_sweep(
   ps,
@@ -11,7 +11,9 @@ run_decontam_threshold_sweep(
   thresholds = seq(0.1, 0.5, 0.1),
   batch = NULL,
   batch_combine = c("minimum", "product", "fisher"),
-  normalize = TRUE
+  normalize = TRUE,
+  method = c("prevalence", "frequency", "combined", "minimum", "either", "both", "auto"),
+  concentration_column = NULL
 )
 }
 \arguments{
@@ -28,13 +30,20 @@ run_decontam_threshold_sweep(
 \item{batch_combine}{Method used by \code{decontam} to combine batch scores.}
 
 \item{normalize}{Passed to \code{\link[decontam:isContaminant]{decontam::isContaminant()}}.}
+
+\item{method}{One of \code{"auto"}, \code{"frequency"}, \code{"prevalence"},
+\code{"combined"}, \code{"minimum"}, \code{"either"}, or \code{"both"}.}
+
+\item{concentration_column}{Sample-data column containing positive numeric
+DNA concentrations. Required by every method with a frequency component.}
 }
 \value{
 A \code{decontam_sensitivity} object.
 }
 \description{
-Convenience wrapper that calculates one set of \code{decontam} prevalence
-scores, then passes those scores and the aligned data to
-\code{\link[=run_threshold_sweep]{run_threshold_sweep()}}. Thresholds are applied downstream, so the
-statistical model is not refit for every threshold.
+Convenience wrapper for every contaminant-identification method currently
+documented by \code{decontam}. Classification is obtained directly from
+\code{\link[decontam:isContaminant]{decontam::isContaminant()}} at every threshold instead of being inferred
+from undocumented detailed-output columns. For \code{"either"} and \code{"both"},
+each sweep value is applied to both the frequency and prevalence tests.
 }

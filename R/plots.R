@@ -66,11 +66,16 @@ plot_decontam_scores <- function(result, bins = 50L) {
   if (!inherits(result, "decontam_sensitivity")) {
     stop("`result` must be returned by `run_threshold_sweep()`.", call. = FALSE)
   }
+  score_label <- if (!is.null(result$score_label)) {
+    result$score_label
+  } else {
+    "decontam score (p)"
+  }
   ggplot2::ggplot(result$feature_summary, ggplot2::aes(x = score)) +
     ggplot2::geom_histogram(bins = bins, fill = "grey30", color = "white") +
     ggplot2::geom_vline(
       xintercept = result$thresholds, linetype = "dashed", color = "firebrick"
     ) +
-    ggplot2::labs(x = "decontam score (p)", y = "Feature count") +
+    ggplot2::labs(x = score_label, y = "Feature count") +
     .qc_theme()
 }

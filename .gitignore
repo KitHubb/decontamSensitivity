@@ -13,3 +13,8 @@ R/data.R
 man/skin_example.Rd
 renv/
 renv.lock
+
+# Local literature review, documents, and article drafts
+/_paper/
+/Analysis_R/data-raw/
+/Analysis_R/results/

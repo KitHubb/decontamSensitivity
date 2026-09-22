@@ -16,7 +16,8 @@ run_threshold_sweep(
   feature_id_column = NULL,
   sample_id_column = NULL,
   taxonomy_id_column = NULL,
-  features_are_rows = NULL
+  features_are_rows = NULL,
+  contaminant_flags = NULL
 )
 }
 \arguments{
@@ -54,6 +55,12 @@ must be row names unless \code{taxonomy_id_column} is supplied.}
 
 \item{features_are_rows}{Logical indicating count-table orientation. If
 \code{NULL}, orientation is inferred from sample IDs.}
+
+\item{contaminant_flags}{Optional logical feature-by-threshold matrix. Rows
+must be named with feature IDs and columns must follow the order of
+\code{thresholds}. When supplied, these classifications are used instead of
+recalculating them from \code{score_column}. This supports \code{decontam} methods
+such as \code{"either"} and \code{"both"} that do not return one overall p-value.}
 }
 \value{
 An object of class \code{decontam_sensitivity} containing threshold,

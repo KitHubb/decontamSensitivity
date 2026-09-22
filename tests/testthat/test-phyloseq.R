@@ -7,7 +7,7 @@ make_toy_ps <- function() {
   )
 }
 
-test_that("phyloseq convenience wrapper runs one prevalence model", {
+test_that("phyloseq convenience wrapper runs the default prevalence method", {
   skip_if_not_installed("phyloseq")
   skip_if_not_installed("decontam")
   ps <- make_toy_ps()
@@ -17,6 +17,105 @@ test_that("phyloseq convenience wrapper runs one prevalence model", {
   ))
   expect_s3_class(result, "decontam_sensitivity")
   expect_equal(result$thresholds, c(0.1, 0.2))
+  expect_identical(result$method, "prevalence")
+  expect_identical(result$classification_source, "provided")
+})
+
+test_that("all decontam methods match direct isContaminant classifications", {
+  skip_if_not_installed("phyloseq")
+  skip_if_not_installed("decontam")
+  ps <- make_toy_ps()
+  metadata <- as.data.frame(phyloseq::sample_data(ps))
+  is_control <- metadata$type == "control"
+  thresholds <- c(0.1, 0.3)
+  methods <- c(
+    "auto", "frequency", "prevalence", "combined",
+    "minimum", "either", "both"
+  )
+
+  for (method in methods) {
+    uses_frequency <- method %in% c(
+      "frequency", "combined", "minimum", "either", "both"
+    )
+    wrapper_args <- list(
+      ps = ps,
+      control_column = "type",
+      control_label = "control",
+      thresholds = thresholds,
+      method = method
+    )
+    if (uses_frequency) {
+      wrapper_args$concentration_column <- "DNA_concentration"
+    }
+    result <- suppressWarnings(do.call(
+      run_decontam_threshold_sweep,
+      wrapper_args
+    ))
+
+    for (threshold in thresholds) {
+      direct_args <- list(
+        seqtab = ps,
+        method = method,
+        threshold = if (method %in% c("either", "both")) {
+          c(threshold, threshold)
+        } else threshold,
+        detailed = FALSE
+      )
+      if (identical(method, "frequency")) {
+        direct_args$conc <- metadata$DNA_concentration
+      } else if (identical(method, "auto") ||
+                 identical(method, "prevalence")) {
+        direct_args$neg <- is_control
+      } else {
+        direct_args$conc <- metadata$DNA_concentration
+        direct_args$neg <- is_control
+      }
+      expected <- suppressWarnings(do.call(
+        decontam::isContaminant,
+        direct_args
+      ))
+      observed <- result$feature_flags$contaminant[
+        result$feature_flags$threshold == threshold
+      ]
+      expect_identical(
+        unname(observed),
+        unname(expected),
+        info = paste("method =", method, "threshold =", threshold)
+      )
+    }
+    expect_identical(result$requested_method, method)
+    expect_true(nzchar(result$decontam_version))
+  }
+})
+
+test_that("frequency-component methods require positive concentration data", {
+  skip_if_not_installed("phyloseq")
+  skip_if_not_installed("decontam")
+  ps <- make_toy_ps()
+
+  expect_error(
+    run_decontam_threshold_sweep(
+      ps,
+      control_column = "type",
+      control_label = "control",
+      method = "both"
+    ),
+    "`concentration_column` is required for method `both`.",
+    fixed = TRUE
+  )
+
+  phyloseq::sample_data(ps)$DNA_concentration[1] <- 0
+  expect_error(
+    run_decontam_threshold_sweep(
+      ps,
+      control_column = "type",
+      control_label = "control",
+      method = "frequency",
+      concentration_column = "DNA_concentration"
+    ),
+    "finite, positive numeric values",
+    fixed = TRUE
+  )
 })
 
 test_that("phyloseq groups and library sizes are summarized", {
@@ -179,6 +278,25 @@ test_that("one-call QC creates taxa plots for every threshold", {
     qc$plots$taxa_reads_before_after_by_threshold,
     inherits, logical(1), what = "ggplot"
   )))
+})
+
+test_that("one-call QC passes combined-method settings to the sweep", {
+  skip_if_not_installed("phyloseq")
+  skip_if_not_installed("decontam")
+  ps <- make_toy_ps()
+  qc <- suppressWarnings(run_decontam_qc(
+    ps,
+    control_column = "type",
+    control_label = "control",
+    thresholds = 0.2,
+    method = "combined",
+    concentration_column = "DNA_concentration",
+    progress = FALSE
+  ))
+
+  expect_identical(qc$result$method, "combined")
+  expect_identical(qc$result$concentration_column, "DNA_concentration")
+  expect_identical(qc$result$classification_source, "provided")
 })
 
 test_that("one-call QC validates the progress option", {

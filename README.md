@@ -3,6 +3,17 @@
 `decontamSensitivity` provides QC summaries and plots for comparing
 `decontam` thresholds in microbiome data.
 
+## Workspace layout
+
+- `_paper/Review/`: literature searches, screening evidence, reference checks, and review tools (local only).
+- `_paper/Docs/`: workspace documentation (local only).
+- `_paper/Article/`: manuscript drafts, editorial notes, and Word preparation tools (local only).
+- `Analysis_R/`: analysis examples, data preparation scripts, and analysis results.
+
+Open `decontamSensitivity.Rproj` in this root directory. The package directories
+`R/`, `man/`, `tests/`, `vignettes/`, and `data/` remain here for R package compatibility.
+Run analysis scripts with the project root as the working directory.
+
 ## Why decontamSensitivity?
 
 Choosing a `decontam` threshold can be difficult in low-biomass studies because
@@ -30,7 +41,7 @@ library(decontamSensitivity)
 
 ## Quick Start
 
-Run the full prevalence-based workflow with one function:
+Run the full workflow with one function. The default method is prevalence:
 
 `ps` must be a `phyloseq` object containing an OTU table and sample metadata.
 The metadata column supplied to `control_column` must identify the negative
@@ -125,12 +136,60 @@ plot_prevalence_enrichment(
 The columns `odds.sample` and `odds.control` are prevalence ratios, not odds
 ratios.
 
-### Frequency method
+### Supported decontam methods
 
-Threshold summaries and retention plots also work with frequency scores. See
-the [frequency-method example](vignettes/hv-threshold-sensitivity.Rmd#frequency-method)
-for the full workflow. The frequency model uses DNA concentration rather than
-control prevalence.
+`run_decontam_threshold_sweep()` and `run_decontam_qc()` support every method
+documented by `decontam`: `"auto"`, `"frequency"`, `"prevalence"`,
+`"combined"`, `"minimum"`, `"either"`, and `"both"`. The official method name
+is `"minimum"`, not `"minimal"`.
+
+Methods with a frequency component require a positive numeric concentration
+column in `sample_data(ps)`:
+
+```r
+frequency_result <- run_decontam_threshold_sweep(
+  ps,
+  control_column = "sample_type",
+  control_label = "control",
+  thresholds = seq(0.1, 0.9, by = 0.1),
+  method = "frequency",
+  concentration_column = "DNA_concentration"
+)
+
+both_result <- run_decontam_threshold_sweep(
+  ps,
+  control_column = "sample_type",
+  control_label = "control",
+  thresholds = seq(0.1, 0.9, by = 0.1),
+  method = "both",
+  concentration_column = "DNA_concentration"
+)
+```
+
+For `"either"` and `"both"`, each value in `thresholds` is applied to both the
+frequency and prevalence tests. Classification flags come from direct
+`decontam::isContaminant(..., detailed = FALSE)` calls at every threshold;
+detailed-output score columns are used only for diagnostic plots. See the
+[all-methods example](vignettes/hv-threshold-sensitivity.Rmd#all-decontam-methods)
+for more examples.
+
+### Test-dataset method comparison
+
+The repository includes a reproducible comparison of the frequency,
+prevalence, and combined methods on the small test dataset. It evaluates
+thresholds `0.01`, `0.05`, and `0.1` through `0.9` in increments of `0.1`,
+then exports threshold summaries, feature-level flags, pairwise method
+agreement, and a comparison plot:
+
+```r
+source("Analysis_R/examples/test_dataset_method_threshold_comparison.R")
+```
+
+Outputs are written to the analysis workspace at
+`../decontamSensitivity_paper/R_analysis/Results/test_method_comparison/`.
+Set the `DECONTAM_ANALYSIS_RESULTS` environment variable only when that
+workspace is stored elsewhere. This toy dataset is suitable for checking code
+behavior, but it is too small to justify an optimal threshold for a real study.
 
 ## Published use case
 

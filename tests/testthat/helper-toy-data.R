@@ -10,6 +10,7 @@ toy_sensitivity_data <- function(transpose = FALSE) {
   dimnames = list(paste0("ASV", 1:6), c("B1", "B2", "C1", "C2")))
   metadata <- data.frame(
     type = c("sample", "sample", "control", "control"),
+    DNA_concentration = c(20, 10, 1, 0.5),
     row.names = colnames(counts)
   )
   scores <- data.frame(

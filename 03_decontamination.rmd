@@ -1,0 +1,1005 @@
+---
+title: "03. Decontamination sensitivity analysis"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    code_folding: hide
+    df_print: paged
+params:
+  force_recompute: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center",
+  dpi = 300
+)
+```
+
+```{r packages}
+# 분석에 사용하는 패키지와 공통 함수를 불러온다.
+source("./load_packages.R")
+source("./functions.R")
+
+package_dir <- normalizePath("../../decontamSensitivity", winslash = "/")
+devtools::load_all(package_dir, quiet = TRUE)
+
+input_path <- "./Phyloseq/phy_F270R210_260921.rds"
+results_dir <- "./Results"
+dir.create(results_dir, showWarnings = FALSE)
+
+thresholds <- c(0.01, 0.05, seq(0.1, 0.9, by = 0.1))
+methods <- c("prevalence", "frequency")
+control_scenarios <- c(
+  "prep_control_only",
+  "air_swab_only",
+  "prep_and_air_swab"
+)
+
+scenario_label <- c(
+  prep_control_only = "Prep control only",
+  air_swab_only = "Air Swab only",
+  prep_and_air_swab = "Prep control + Air Swab"
+)
+
+method_label <- c(
+  prevalence = "Prevalence",
+  frequency = "Frequency"
+)
+
+batch_label <- c(
+  pooled = "Pooled",
+  cycle_batch = "Cycle aware"
+)
+```
+
+# 1) Analysis setting
+
+```{r sample-setting}
+# 양성 대조군은 제외하고 각 negative control 정의를 동일한 조건에서 비교한다.
+phy <- readRDS(input_path)
+metadata <- data.frame(sample_data(phy), check.names = FALSE) |>
+  tibble::rownames_to_column("SampleID") |>
+  dplyr::mutate(
+    is_prep_control = control_type == "Prep control" & !is.na(control_type),
+    is_air_swab = control_type == "Air Swab" & !is.na(control_type),
+    is_positive_control = Sample_Control == "PC" & !is.na(Sample_Control),
+    is_true = !is_prep_control & !is_air_swab & !is_positive_control,
+    Cycle = sub("\\.0$", "", as.character(Cycle)),
+    concentration_raw = as.numeric(DNA_ng_uL)
+  )
+
+zero_replacement <- min(
+  metadata$concentration_raw[metadata$concentration_raw > 0],
+  na.rm = TRUE
+) / 2
+
+metadata <- metadata |>
+  dplyr::mutate(
+    decontam_concentration = dplyr::if_else(
+      concentration_raw == 0,
+      zero_replacement,
+      concentration_raw
+    )
+  )
+
+phy_metadata <- metadata |>
+  tibble::column_to_rownames("SampleID")
+sample_data(phy) <- sample_data(phy_metadata)
+
+analysis_setting <- tibble::tibble(
+  item = c(
+    "True samples",
+    "Prep controls",
+    "Air swabs",
+    "Positive controls excluded",
+    "ASVs",
+    "Zero concentration replacement"
+  ),
+  value = c(
+    sum(metadata$is_true),
+    sum(metadata$is_prep_control),
+    sum(metadata$is_air_swab),
+    sum(metadata$is_positive_control),
+    ntaxa(phy),
+    zero_replacement
+  )
+)
+
+knitr::kable(analysis_setting, digits = 4)
+```
+
+```{r control-balance}
+# Cycle별로 실제 검체와 음성 대조군이 함께 존재하는지 확인한다.
+control_balance <- metadata |>
+  dplyr::mutate(
+    sample_role = dplyr::case_when(
+      is_true ~ "True",
+      is_prep_control ~ "Prep control",
+      is_air_swab ~ "Air Swab",
+      TRUE ~ "Positive control"
+    )
+  ) |>
+  dplyr::count(Cycle, sample_role, name = "n_samples") |>
+  dplyr::arrange(Cycle, sample_role)
+
+readr::write_csv(control_balance, file.path(results_dir, "03_control_balance.csv"))
+knitr::kable(control_balance)
+```
+
+# 2) Threshold sweep
+
+```{r decontam-function}
+# 같은 분석을 control, method, batch 조합마다 반복한다.
+run_decontam_comparison <- function(control_scenario, method, batch_mode) {
+  meta <- data.frame(sample_data(phy), check.names = FALSE)
+
+  selected_control <- switch(
+    control_scenario,
+    prep_control_only = meta$is_prep_control,
+    air_swab_only = meta$is_air_swab,
+    prep_and_air_swab = meta$is_prep_control | meta$is_air_swab
+  )
+
+  keep_sample <- meta$is_true | selected_control
+  run_phy <- prune_samples(keep_sample, phy)
+  run_phy <- prune_taxa(taxa_sums(run_phy) > 0, run_phy)
+
+  run_meta <- data.frame(sample_data(run_phy), check.names = FALSE)
+  run_meta$decontam_group <- ifelse(selected_control[keep_sample], "control", "biological")
+  sample_data(run_phy) <- sample_data(run_meta)
+
+  argument <- list(
+    ps = run_phy,
+    control_column = "decontam_group",
+    control_label = "control",
+    thresholds = thresholds,
+    method = method
+  )
+
+  if (method == "frequency") {
+    argument$concentration_column <- "decontam_concentration"
+  }
+
+  if (batch_mode == "cycle_batch") {
+    argument$batch <- "Cycle"
+    argument$batch_combine <- "minimum"
+  }
+
+  list(
+    control_scenario = control_scenario,
+    method = method,
+    batch_mode = batch_mode,
+    phy = run_phy,
+    result = do.call(
+      decontamSensitivity::run_decontam_threshold_sweep,
+      argument
+    )
+  )
+}
+```
+
+```{r run-decontam}
+analysis_grid <- tidyr::crossing(
+  control_scenario = control_scenarios,
+  method = methods,
+  batch_mode = c("pooled", "cycle_batch")
+) |>
+  dplyr::mutate(
+    run_id = paste(control_scenario, method, batch_mode, sep = "__")
+  )
+
+cache_path <- file.path(results_dir, "03_decontamination_runs.rds")
+cache_config <- list(
+  input_md5 = unname(tools::md5sum(input_path)),
+  thresholds = thresholds,
+  methods = methods,
+  control_scenarios = control_scenarios
+)
+
+use_cache <- FALSE
+if (file.exists(cache_path) && !isTRUE(params$force_recompute)) {
+  cached <- readRDS(cache_path)
+  use_cache <- identical(cached$config, cache_config)
+}
+
+if (use_cache) {
+  comparison_runs <- cached$runs
+} else {
+  comparison_runs <- vector("list", nrow(analysis_grid))
+  names(comparison_runs) <- analysis_grid$run_id
+
+  for (i in seq_len(nrow(analysis_grid))) {
+    run_info <- analysis_grid[i, ]
+    comparison_runs[[run_info$run_id]] <- run_decontam_comparison(
+      control_scenario = run_info$control_scenario,
+      method = run_info$method,
+      batch_mode = run_info$batch_mode
+    )
+  }
+
+  saveRDS(list(config = cache_config, runs = comparison_runs), cache_path)
+}
+
+analysis_grid |>
+  dplyr::mutate(cache_used = use_cache) |>
+  knitr::kable()
+```
+
+```{r collect-results}
+# threshold summary와 contaminant ASV 목록을 하나의 표로 합친다.
+summary_list <- vector("list", length(comparison_runs))
+flag_list <- vector("list", length(comparison_runs))
+
+for (i in seq_along(comparison_runs)) {
+  run <- comparison_runs[[i]]
+
+  summary_list[[i]] <- run$result$threshold_summary |>
+    dplyr::mutate(
+      batch_mode = run$batch_mode,
+      batch_definition = unname(batch_label[run$batch_mode]),
+      control_scenario = run$control_scenario,
+      control_definition = unname(scenario_label[run$control_scenario]),
+      method = run$method,
+      method_definition = unname(method_label[run$method]),
+      .before = 1
+    )
+
+  flag_list[[i]] <- run$result$feature_flags |>
+    dplyr::filter(contaminant) |>
+    dplyr::left_join(
+      run$result$feature_summary |>
+        dplyr::select(
+          feature_id,
+          reads_biological,
+          reads_control,
+          dplyr::any_of(c("Phylum", "Class", "Order", "Family", "Genus", "Species"))
+        ),
+      by = "feature_id"
+    ) |>
+    dplyr::mutate(
+      batch_mode = run$batch_mode,
+      batch_definition = unname(batch_label[run$batch_mode]),
+      control_scenario = run$control_scenario,
+      control_definition = unname(scenario_label[run$control_scenario]),
+      method = run$method,
+      method_definition = unname(method_label[run$method]),
+      .before = 1
+    )
+}
+
+threshold_summary <- dplyr::bind_rows(summary_list) |>
+  dplyr::arrange(batch_mode, control_scenario, method, threshold)
+
+flagged_asv <- dplyr::bind_rows(flag_list) |>
+  dplyr::arrange(batch_mode, control_scenario, method, threshold, feature_id)
+
+readr::write_csv(threshold_summary, file.path(results_dir, "03_threshold_summary.csv"))
+readr::write_csv(flagged_asv, file.path(results_dir, "03_flagged_ASV.csv"))
+```
+
+# 3) Selecting a threshold
+
+## Control depletion and True sample retention
+
+```{r threshold-metrics}
+# 높은 control 제거율과 낮은 True read 손실을 동시에 비교한다.
+threshold_metrics <- threshold_summary |>
+  dplyr::mutate(
+    threshold = round(threshold, 2),
+    control_reads_removed_pct = 100 - control_reads_retained_pct,
+    true_reads_lost_pct = 100 - biological_reads_retained_pct
+  ) |>
+  dplyr::group_by(batch_mode, control_scenario, method) |>
+  dplyr::arrange(threshold, .by_group = TRUE) |>
+  dplyr::mutate(
+    control_range = max(control_reads_removed_pct) - min(control_reads_removed_pct),
+    true_range = max(true_reads_lost_pct) - min(true_reads_lost_pct),
+    control_gain_scaled = dplyr::if_else(
+      control_range == 0,
+      0,
+      (control_reads_removed_pct - min(control_reads_removed_pct)) / control_range
+    ),
+    true_loss_scaled = dplyr::if_else(
+      true_range == 0,
+      0,
+      (true_reads_lost_pct - min(true_reads_lost_pct)) / true_range
+    ),
+    balance_index = control_gain_scaled - true_loss_scaled,
+    additional_control_removed = control_reads_removed_pct - dplyr::lag(control_reads_removed_pct),
+    additional_true_loss = true_reads_lost_pct - dplyr::lag(true_reads_lost_pct),
+    gain_per_true_loss = additional_control_removed / pmax(additional_true_loss, 0.01)
+  ) |>
+  dplyr::ungroup() |>
+  dplyr::select(-control_range, -true_range)
+
+cutoff_candidates <- threshold_metrics |>
+  dplyr::group_by(batch_mode, control_scenario, method) |>
+  dplyr::slice_max(balance_index, n = 1, with_ties = FALSE) |>
+  dplyr::ungroup() |>
+  dplyr::select(
+    batch_definition,
+    control_definition,
+    method_definition,
+    threshold,
+    control_reads_removed_pct,
+    biological_reads_retained_pct,
+    contaminant_features,
+    balance_index
+  )
+
+readr::write_csv(threshold_metrics, file.path(results_dir, "03_threshold_tradeoff_metrics.csv"))
+readr::write_csv(cutoff_candidates, file.path(results_dir, "03_cutoff_candidates.csv"))
+
+knitr::kable(cutoff_candidates, digits = 2)
+```
+
+`balance_index`는 최종 정답이 아니라 후보 지점이다. 각 분석 안에서 control 제거 증가량과 True read 손실 증가량을 0에서 1로 표준화한 뒤, 전자가 후자보다 가장 크게 앞서는 threshold를 표시한다. 최종 cutoff는 아래 곡선과 제거 taxa를 함께 확인하여 결정한다.
+
+```{r tradeoff-plot, fig.width=15, fig.height=10}
+tradeoff_plot <- threshold_metrics |>
+  ggplot(
+    aes(
+      x = true_reads_lost_pct,
+      y = control_reads_removed_pct,
+      color = method_definition,
+      group = method_definition
+    )
+  ) +
+  geom_path(linewidth = 0.7) +
+  geom_point(size = 2.2) +
+  ggrepel::geom_text_repel(
+    aes(label = threshold),
+    size = 2.7,
+    show.legend = FALSE,
+    max.overlaps = Inf
+  ) +
+  facet_grid(batch_definition ~ control_definition, scales = "free") +
+  scale_color_manual(values = c("Prevalence" = "#0072B2", "Frequency" = "#D55E00")) +
+  labs(
+    x = "True sample reads lost (%)",
+    y = "Negative control reads removed (%)",
+    color = "Method"
+  ) +
+  theme_classic() +
+  theme(
+    strip.background = element_rect(fill = "white", color = "grey50"),
+    legend.position = "top"
+  )
+
+ggsave(
+  file.path(results_dir, "03_threshold_tradeoff.png"),
+  tradeoff_plot,
+  width = 15,
+  height = 10,
+  dpi = 300
+)
+
+tradeoff_plot
+```
+
+```{r sensitivity-curve, fig.width=15, fig.height=10}
+sensitivity_data <- threshold_metrics |>
+  dplyr::select(
+    batch_definition,
+    control_definition,
+    method_definition,
+    threshold,
+    control_reads_removed_pct,
+    true_reads_lost_pct
+  ) |>
+  tidyr::pivot_longer(
+    cols = c(control_reads_removed_pct, true_reads_lost_pct),
+    names_to = "metric",
+    values_to = "percent"
+  ) |>
+  dplyr::mutate(
+    metric = dplyr::recode(
+      metric,
+      control_reads_removed_pct = "Control reads removed",
+      true_reads_lost_pct = "True sample reads lost"
+    )
+  )
+
+sensitivity_plot <- ggplot(
+  sensitivity_data,
+  aes(x = threshold, y = percent, color = metric)
+) +
+  geom_line(linewidth = 0.7) +
+  geom_point(size = 1.8) +
+  facet_grid(
+    batch_definition + method_definition ~ control_definition,
+    scales = "free_y"
+  ) +
+  scale_color_manual(values = c(
+    "Control reads removed" = "#009E73",
+    "True sample reads lost" = "#D55E00"
+  )) +
+  scale_x_continuous(breaks = thresholds) +
+  labs(x = "Threshold", y = "Reads (%)", color = NULL) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "white", color = "grey50"),
+    legend.position = "top"
+  )
+
+ggsave(
+  file.path(results_dir, "03_threshold_sensitivity_curve.png"),
+  sensitivity_plot,
+  width = 15,
+  height = 10,
+  dpi = 300
+)
+
+sensitivity_plot
+```
+
+# 4) Pooled analysis and Cycle aware analysis
+
+```{r batch-comparison}
+# 같은 threshold에서 Cycle을 반영했을 때의 변화량을 계산한다.
+batch_comparison <- threshold_metrics |>
+  dplyr::select(
+    control_scenario,
+    control_definition,
+    method,
+    method_definition,
+    threshold,
+    batch_mode,
+    contaminant_features,
+    biological_reads_retained_pct,
+    control_reads_removed_pct
+  ) |>
+  tidyr::pivot_wider(
+    names_from = batch_mode,
+    values_from = c(
+      contaminant_features,
+      biological_reads_retained_pct,
+      control_reads_removed_pct
+    )
+  ) |>
+  dplyr::mutate(
+    additional_contaminant_ASVs = contaminant_features_cycle_batch - contaminant_features_pooled,
+    change_in_true_retention = biological_reads_retained_pct_cycle_batch - biological_reads_retained_pct_pooled,
+    change_in_control_removal = control_reads_removed_pct_cycle_batch - control_reads_removed_pct_pooled
+  )
+
+readr::write_csv(batch_comparison, file.path(results_dir, "03_pooled_vs_cycle.csv"))
+```
+
+```{r batch-comparison-plot, fig.width=14, fig.height=8}
+batch_plot_data <- batch_comparison |>
+  dplyr::select(
+    control_definition,
+    method_definition,
+    threshold,
+    additional_contaminant_ASVs,
+    change_in_true_retention,
+    change_in_control_removal
+  ) |>
+  tidyr::pivot_longer(
+    cols = c(additional_contaminant_ASVs, change_in_true_retention, change_in_control_removal),
+    names_to = "metric",
+    values_to = "difference"
+  ) |>
+  dplyr::mutate(
+    metric = dplyr::recode(
+      metric,
+      additional_contaminant_ASVs = "Additional contaminant ASVs",
+      change_in_true_retention = "Change in True read retention (%)",
+      change_in_control_removal = "Change in control read removal (%)"
+    )
+  )
+
+batch_comparison_plot <- ggplot(
+  batch_plot_data,
+  aes(x = threshold, y = difference, color = method_definition)
+) +
+  geom_hline(yintercept = 0, color = "grey70") +
+  geom_line(linewidth = 0.7) +
+  geom_point(size = 1.8) +
+  facet_grid(metric ~ control_definition, scales = "free_y") +
+  scale_color_manual(values = c("Prevalence" = "#0072B2", "Frequency" = "#D55E00")) +
+  scale_x_continuous(breaks = thresholds) +
+  labs(x = "Threshold", y = "Cycle aware minus pooled", color = "Method") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "white", color = "grey50"),
+    legend.position = "top"
+  )
+
+ggsave(
+  file.path(results_dir, "03_pooled_vs_cycle.png"),
+  batch_comparison_plot,
+  width = 14,
+  height = 8,
+  dpi = 300
+)
+
+batch_comparison_plot
+```
+
+# 5) Prevalence and Frequency overlap
+
+```{r method-overlap}
+# 각 threshold에서 두 방법의 공통 ASV와 고유 ASV를 계산한다.
+overlap_grid <- tidyr::crossing(
+  batch_mode = c("pooled", "cycle_batch"),
+  control_scenario = control_scenarios,
+  threshold = thresholds
+)
+
+overlap_list <- vector("list", nrow(overlap_grid))
+overlap_member_list <- vector("list", nrow(overlap_grid))
+
+for (i in seq_len(nrow(overlap_grid))) {
+  setting <- overlap_grid[i, ]
+
+  prevalence_asv <- flagged_asv |>
+    dplyr::filter(
+      batch_mode == setting$batch_mode,
+      control_scenario == setting$control_scenario,
+      method == "prevalence",
+      threshold == setting$threshold
+    ) |>
+    dplyr::pull(feature_id) |>
+    unique()
+
+  frequency_asv <- flagged_asv |>
+    dplyr::filter(
+      batch_mode == setting$batch_mode,
+      control_scenario == setting$control_scenario,
+      method == "frequency",
+      threshold == setting$threshold
+    ) |>
+    dplyr::pull(feature_id) |>
+    unique()
+
+  all_asv <- union(prevalence_asv, frequency_asv)
+  overlap_asv <- intersect(prevalence_asv, frequency_asv)
+
+  overlap_list[[i]] <- tibble::tibble(
+    batch_mode = setting$batch_mode,
+    batch_definition = unname(batch_label[setting$batch_mode]),
+    control_scenario = setting$control_scenario,
+    control_definition = unname(scenario_label[setting$control_scenario]),
+    threshold = setting$threshold,
+    prevalence_only = length(setdiff(prevalence_asv, frequency_asv)),
+    overlap = length(overlap_asv),
+    frequency_only = length(setdiff(frequency_asv, prevalence_asv)),
+    jaccard = length(overlap_asv) / max(length(all_asv), 1)
+  )
+
+  overlap_member_list[[i]] <- tibble::tibble(
+    batch_mode = setting$batch_mode,
+    control_scenario = setting$control_scenario,
+    threshold = setting$threshold,
+    feature_id = all_asv,
+    membership = dplyr::case_when(
+      all_asv %in% overlap_asv ~ "Overlap",
+      all_asv %in% prevalence_asv ~ "Prevalence only",
+      TRUE ~ "Frequency only"
+    )
+  )
+}
+
+method_overlap <- dplyr::bind_rows(overlap_list)
+method_overlap_member <- dplyr::bind_rows(overlap_member_list)
+
+taxonomy_lookup <- data.frame(tax_table(phy), check.names = FALSE) |>
+  tibble::rownames_to_column("feature_id")
+
+method_overlap_member <- method_overlap_member |>
+  dplyr::left_join(taxonomy_lookup, by = "feature_id")
+
+readr::write_csv(method_overlap, file.path(results_dir, "03_method_overlap.csv"))
+readr::write_csv(method_overlap_member, file.path(results_dir, "03_method_overlap_ASV.csv"))
+```
+
+```{r method-overlap-plot, fig.width=15, fig.height=10}
+overlap_plot_data <- method_overlap |>
+  tidyr::pivot_longer(
+    cols = c(prevalence_only, overlap, frequency_only),
+    names_to = "membership",
+    values_to = "n_ASVs"
+  ) |>
+  dplyr::mutate(
+    membership = factor(
+      membership,
+      levels = c("prevalence_only", "overlap", "frequency_only"),
+      labels = c("Prevalence only", "Overlap", "Frequency only")
+    )
+  )
+
+method_overlap_plot <- ggplot(
+  overlap_plot_data,
+  aes(x = threshold, y = n_ASVs, fill = membership)
+) +
+  geom_col() +
+  facet_grid(batch_definition ~ control_definition, scales = "free_y") +
+  scale_fill_manual(values = c(
+    "Prevalence only" = "#0072B2",
+    "Overlap" = "#009E73",
+    "Frequency only" = "#D55E00"
+  )) +
+  scale_x_continuous(breaks = thresholds) +
+  labs(x = "Threshold", y = "Number of contaminant ASVs", fill = NULL) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "white", color = "grey50"),
+    legend.position = "top"
+  )
+
+ggsave(
+  file.path(results_dir, "03_prevalence_frequency_overlap.png"),
+  method_overlap_plot,
+  width = 15,
+  height = 10,
+  dpi = 300
+)
+
+method_overlap_plot
+```
+
+## Prevalence and Frequency overlap proportion
+
+```{r method-overlap-100-percent-plot, fig.width=15, fig.height=10}
+# 각 threshold의 세 영역 합계가 100%가 되도록 비율을 비교한다.
+method_overlap_percent_plot <- ggplot(
+  overlap_plot_data,
+  aes(
+    x = factor(threshold, levels = thresholds),
+    y = n_ASVs,
+    fill = membership
+  )
+) +
+  geom_col(position = "fill") +
+  facet_grid(batch_definition ~ control_definition) +
+  scale_fill_manual(values = c(
+    "Prevalence only" = "#0072B2",
+    "Overlap" = "#009E73",
+    "Frequency only" = "#D55E00"
+  )) +
+  scale_y_continuous(labels = scales::label_percent()) +
+  labs(
+    x = "Threshold",
+    y = "Proportion of contaminant ASVs",
+    fill = NULL
+  ) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "white", color = "grey50"),
+    legend.position = "top"
+  )
+
+ggsave(
+  file.path(results_dir, "03_prevalence_frequency_overlap_100_percent.png"),
+  method_overlap_percent_plot,
+  width = 15,
+  height = 10,
+  dpi = 300
+)
+
+method_overlap_percent_plot
+```
+
+## Taxa shared at thresholds 0.5 and 0.6
+
+```{r overlap-taxa}
+# 요청한 0.5와 0.6에서 공통으로 제거되는 ASV의 taxonomy를 정리한다.
+overlap_taxa_05_06 <- method_overlap_member |>
+  dplyr::filter(
+    threshold %in% c(0.5, 0.6),
+    membership == "Overlap"
+  ) |>
+  dplyr::mutate(
+    Genus = dplyr::if_else(is.na(Genus) | Genus == "", "Unclassified", as.character(Genus)),
+    Species = dplyr::if_else(is.na(Species) | Species == "", "Unclassified", as.character(Species))
+  ) |>
+  dplyr::count(
+    batch_mode,
+    control_scenario,
+    threshold,
+    Phylum,
+    Family,
+    Genus,
+    Species,
+    name = "n_ASVs"
+  ) |>
+  dplyr::arrange(batch_mode, control_scenario, threshold, dplyr::desc(n_ASVs))
+
+readr::write_csv(
+  overlap_taxa_05_06,
+  file.path(results_dir, "03_overlap_taxa_threshold_0.5_0.6.csv")
+)
+
+overlap_taxa_05_06 |>
+  dplyr::group_by(batch_mode, control_scenario, threshold) |>
+  dplyr::slice_max(n_ASVs, n = 15, with_ties = FALSE) |>
+  dplyr::ungroup() |>
+  knitr::kable()
+```
+
+# 6) True read retention and selected taxon loss
+
+The representative control taxa include *Lepagella*, *Lactobacillus*, and
+*Duncaniella*. Their abundance and threshold dependent removal are evaluated
+using the combined Prep controls and Air Swabs.
+
+```{r commensal-reduction-data}
+# Cycle을 반영한 Prep control + Air Swab 분석에서 주요 피부 상재균과 대표 오염균의 감소율을 계산한다.
+commensal_genera <- c("Cutibacterium", "Lawsonella", "Corynebacterium")
+
+otu_matrix <- as(otu_table(phy), "matrix")
+if (!taxa_are_rows(phy)) {
+  otu_matrix <- t(otu_matrix)
+}
+
+true_sample_ids <- metadata |>
+  dplyr::filter(is_true) |>
+  dplyr::pull(SampleID) |>
+  intersect(colnames(otu_matrix))
+
+taxonomy_table <- data.frame(tax_table(phy), check.names = FALSE) |>
+  tibble::rownames_to_column("feature_id") |>
+  dplyr::select(feature_id, Genus)
+
+negative_control_ids <- metadata |>
+  dplyr::filter(is_prep_control | is_air_swab) |>
+  dplyr::pull(SampleID) |>
+  intersect(colnames(otu_matrix))
+
+control_genus_totals <- tibble::tibble(
+  feature_id = rownames(otu_matrix),
+  control_reads = rowSums(
+    otu_matrix[, negative_control_ids, drop = FALSE]
+  )
+) |>
+  dplyr::left_join(taxonomy_table, by = "feature_id") |>
+  dplyr::filter(!is.na(Genus), Genus != "", control_reads > 0) |>
+  dplyr::group_by(Genus) |>
+  dplyr::summarise(
+    control_reads = sum(control_reads),
+    .groups = "drop"
+  ) |>
+  dplyr::arrange(dplyr::desc(control_reads)) |>
+  dplyr::mutate(control_abundance_rank = dplyr::row_number())
+
+contaminant_genera <- c("Lepagella", "Lactobacillus", "Duncaniella")
+
+selected_control_genera <- control_genus_totals |>
+  dplyr::filter(Genus %in% contaminant_genera) |>
+  dplyr::mutate(
+    display_order = match(Genus, contaminant_genera),
+    .before = 1
+  ) |>
+  dplyr::arrange(display_order)
+
+target_genera <- c(commensal_genera, contaminant_genera)
+
+taxon_colors <- c(
+  stats::setNames(c("#E69F00", "#CC79A7", "#009E73"), commensal_genera),
+  stats::setNames(c("#0072B2", "#56B4E9", "#D55E00"), contaminant_genera)
+)
+
+readr::write_csv(
+  selected_control_genera,
+  file.path(results_dir, "03_selected_negative_control_genera.csv")
+)
+
+true_genus_totals <- tibble::tibble(
+  feature_id = rownames(otu_matrix),
+  original_true_reads = rowSums(
+    otu_matrix[, true_sample_ids, drop = FALSE]
+  )
+) |>
+  dplyr::left_join(taxonomy_table, by = "feature_id") |>
+  dplyr::filter(Genus %in% target_genera) |>
+  dplyr::group_by(Genus) |>
+  dplyr::summarise(
+    original_true_reads = sum(original_true_reads),
+    .groups = "drop"
+  )
+
+removed_commensal_reads <- flagged_asv |>
+  dplyr::filter(
+    batch_mode == "cycle_batch",
+    control_scenario == "prep_and_air_swab",
+    method %in% methods,
+    Genus %in% target_genera
+  ) |>
+  dplyr::group_by(method, method_definition, threshold, Genus) |>
+  dplyr::summarise(
+    removed_true_reads = sum(reads_biological),
+    removed_ASVs = dplyr::n_distinct(feature_id),
+    .groups = "drop"
+  )
+
+commensal_reduction <- tidyr::crossing(
+  method = methods,
+  threshold = thresholds,
+  Genus = target_genera
+) |>
+  dplyr::mutate(
+    method_definition = unname(method_label[method])
+  ) |>
+  dplyr::left_join(
+    removed_commensal_reads,
+    by = c("method", "method_definition", "threshold", "Genus")
+  ) |>
+  dplyr::left_join(true_genus_totals, by = "Genus") |>
+  dplyr::mutate(
+    removed_true_reads = tidyr::replace_na(removed_true_reads, 0),
+    removed_ASVs = tidyr::replace_na(removed_ASVs, 0L),
+    reduction_pct = 100 * removed_true_reads / original_true_reads,
+    retained_pct = 100 - reduction_pct,
+    taxon_group = dplyr::if_else(
+      Genus %in% commensal_genera,
+      "Skin commensal",
+      "Representative contaminant"
+    ),
+    Genus_label = Genus
+  ) |>
+  dplyr::arrange(method, threshold, Genus)
+
+true_read_retention <- threshold_summary |>
+  dplyr::filter(
+    batch_mode == "cycle_batch",
+    control_scenario == "prep_and_air_swab",
+    method %in% methods
+  ) |>
+  dplyr::select(
+    method,
+    method_definition,
+    threshold,
+    biological_reads_retained_pct
+  ) |>
+  dplyr::arrange(method, threshold)
+
+readr::write_csv(
+  commensal_reduction |>
+    dplyr::filter(taxon_group == "Skin commensal"),
+  file.path(results_dir, "03_commensal_reduction_by_threshold.csv")
+)
+
+readr::write_csv(
+  commensal_reduction,
+  file.path(results_dir, "03_selected_taxa_reduction_by_threshold.csv")
+)
+
+readr::write_csv(
+  true_read_retention,
+  file.path(results_dir, "03_true_read_retention_batch_aware.csv")
+)
+```
+
+```{r commensal-reduction-plot, fig.width=13, fig.height=9}
+# 전체 True read 유지율과 선택한 균속의 감소율을 같은 threshold 축에서 비교한다.
+true_retention_plot <- ggplot(
+  true_read_retention,
+  aes(
+    x = threshold,
+    y = biological_reads_retained_pct,
+    color = method_definition
+  )
+) +
+  geom_hline(yintercept = 80, color = "grey70", linetype = "dashed") +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2.2) +
+  scale_color_manual(values = c(
+    "Prevalence" = "#0072B2",
+    "Frequency" = "#D55E00"
+  )) +
+  scale_x_continuous(breaks = thresholds) +
+  scale_y_continuous(
+    limits = c(0, 100),
+    labels = scales::label_percent(scale = 1)
+  ) +
+  labs(
+    x = NULL,
+    y = "True reads retained",
+    color = NULL
+  ) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    legend.position = "top"
+  )
+
+commensal_reduction_plot <- ggplot(
+  commensal_reduction,
+  aes(
+    x = threshold,
+    y = reduction_pct,
+    color = Genus_label,
+    linetype = taxon_group
+  )
+) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2.2) +
+  facet_wrap(~method_definition, nrow = 1) +
+  scale_color_manual(values = taxon_colors) +
+  scale_linetype_manual(values = c(
+    "Skin commensal" = "solid",
+    "Representative contaminant" = "22"
+  )) +
+  scale_x_continuous(breaks = thresholds) +
+  scale_y_continuous(
+    limits = c(0, 100),
+    labels = scales::label_percent(scale = 1)
+  ) +
+  labs(
+    x = "Threshold",
+    y = "Selected genus reads removed",
+    color = "Genus",
+    linetype = NULL
+  ) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "white", color = "grey50"),
+    legend.position = "top"
+  )
+
+retention_commensal_plot <- true_retention_plot /
+  commensal_reduction_plot +
+  patchwork::plot_layout(heights = c(0.8, 1.2), guides = "collect") &
+  theme(legend.position = "top")
+
+ggsave(
+  file.path(results_dir, "03_true_retention_and_commensal_reduction.png"),
+  retention_commensal_plot,
+  width = 13,
+  height = 9,
+  dpi = 300
+)
+
+retention_commensal_plot
+```
+
+```{r commensal-reduction-table}
+# 의사결정에 사용한 threshold 구간에서 상재균과 대표 오염균을 함께 확인한다.
+selected_control_genera |>
+  dplyr::select(control_abundance_rank, Genus, control_reads) |>
+  knitr::kable(
+    col.names = c("Control abundance rank", "Genus", "Combined negative control reads")
+  )
+
+commensal_reduction |>
+  dplyr::filter(threshold %in% c(0.3, 0.4, 0.5, 0.6)) |>
+  dplyr::select(
+    method_definition,
+    threshold,
+    taxon_group,
+    Genus,
+    original_true_reads,
+    removed_true_reads,
+    reduction_pct
+  ) |>
+  dplyr::mutate(reduction_pct = round(reduction_pct, 1)) |>
+  knitr::kable(
+    col.names = c(
+      "Method",
+      "Threshold",
+      "Taxon group",
+      "Genus",
+      "Original True reads",
+      "Removed True reads",
+      "Reduction (%)"
+    )
+  )
+```
+
+```{r session-info}
+sessionInfo()
+```

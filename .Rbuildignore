@@ -6,3 +6,5 @@
 ^\.git$
 ^\.gitignore$
 ^LICENSE\.md$
+^_paper$
+^Analysis_R$

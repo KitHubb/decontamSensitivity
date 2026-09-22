@@ -23,6 +23,11 @@
 #' @param taxonomy Optional data frame containing feature taxonomy. Feature IDs
 #'   must be row names unless `taxonomy_id_column` is supplied.
 #' @param score_column Name of the contaminant score column.
+#' @param contaminant_flags Optional logical feature-by-threshold matrix. Rows
+#'   must be named with feature IDs and columns must follow the order of
+#'   `thresholds`. When supplied, these classifications are used instead of
+#'   recalculating them from `score_column`. This supports `decontam` methods
+#'   such as `"either"` and `"both"` that do not return one overall p-value.
 #' @param feature_id_column Optional feature-ID column in `decontam_result`.
 #' @param sample_id_column Optional sample-ID column in `metadata`.
 #' @param taxonomy_id_column Optional feature-ID column in `taxonomy`.
@@ -56,7 +61,8 @@ run_threshold_sweep <- function(decontam_result,
                                 feature_id_column = NULL,
                                 sample_id_column = NULL,
                                 taxonomy_id_column = NULL,
-                                features_are_rows = NULL) {
+                                features_are_rows = NULL,
+                                contaminant_flags = NULL) {
   .assert_scalar_character(control_column, "control_column")
   .assert_scalar_character(score_column, "score_column")
   thresholds <- .validate_thresholds(thresholds)
@@ -147,9 +153,35 @@ run_threshold_sweep <- function(decontam_result,
   sample_group <- ifelse(is_control, "control", "biological")
   names(sample_group) <- sample_ids
   p <- scores[[score_column]]
-  flags <- vapply(thresholds, function(th) !is.na(p) & p < th, logical(length(p)))
-  if (is.null(dim(flags))) flags <- matrix(flags, ncol = 1L)
-  rownames(flags) <- feature_ids
+  if (is.null(contaminant_flags)) {
+    flags <- vapply(
+      thresholds,
+      function(th) !is.na(p) & p < th,
+      logical(length(p))
+    )
+    if (is.null(dim(flags))) flags <- matrix(flags, ncol = 1L)
+    rownames(flags) <- feature_ids
+    classification_source <- "score"
+  } else {
+    flags <- as.matrix(contaminant_flags)
+    if (!is.logical(flags) || anyNA(flags) ||
+        nrow(flags) != length(feature_ids) ||
+        ncol(flags) != length(thresholds)) {
+      stop(
+        "`contaminant_flags` must be a non-missing logical matrix with one row per feature and one column per threshold.",
+        call. = FALSE
+      )
+    }
+    if (is.null(rownames(flags)) || anyDuplicated(rownames(flags)) ||
+        !setequal(rownames(flags), feature_ids)) {
+      stop(
+        "Row names in `contaminant_flags` must match count-table feature IDs exactly.",
+        call. = FALSE
+      )
+    }
+    flags <- flags[feature_ids, , drop = FALSE]
+    classification_source <- "provided"
+  }
   colnames(flags) <- format(thresholds, trim = TRUE, scientific = FALSE)
 
   groups <- list(
@@ -263,6 +295,7 @@ run_threshold_sweep <- function(decontam_result,
     taxonomy = taxonomy,
     is_control = stats::setNames(is_control, sample_ids),
     score_column = score_column,
+    classification_source = classification_source,
     call = match.call()
   ), class = "decontam_sensitivity")
 }

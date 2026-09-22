@@ -1,0 +1,475 @@
+---
+title: "02. Basic analysis"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    code_folding: hide
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center",
+  dpi = 300
+)
+```
+
+```{r packages}
+# 분석에 사용하는 패키지와 공통 함수를 불러온다.
+source("./load_packages.R")
+source("./functions.R")
+
+input_path <- "./Phyloseq/phy_F270R210_260921.rds"
+results_dir <- "./Results"
+dir.create(results_dir, showWarnings = FALSE)
+
+phy <- readRDS(input_path)
+```
+
+# 1) Overview check
+
+## Sample information
+
+```{r sample-information}
+# 음성 대조군, 양성 대조군, 실제 피부 검체를 구분한다.
+sample_info <- data.frame(sample_data(phy), check.names = FALSE) |>
+  tibble::rownames_to_column("SampleID") |>
+  dplyr::mutate(
+    Cycle = sub("\\.0$", "", as.character(Cycle)),
+    Cycle = dplyr::na_if(Cycle, "-"),
+    sample_type = dplyr::case_when(
+      control_type %in% c("Prep control", "Air Swab") ~ "NC",
+      Sample_Control == "PC" ~ "Positive control",
+      TRUE ~ "True"
+    ),
+    control_type = dplyr::case_when(
+      sample_type == "True" ~ "True sample",
+      sample_type == "Positive control" ~ "Positive control",
+      TRUE ~ as.character(control_type)
+    ),
+    Site = dplyr::if_else(
+      is.na(Region) | Region == "",
+      "Missing",
+      as.character(Region)
+    ),
+    Subject = dplyr::if_else(
+      is.na(Subject) | Subject == "",
+      "Missing",
+      as.character(Subject)
+    ),
+    prep_site = dplyr::case_when(
+      control_type == "Prep control" & grepl("^aswab", Subject, ignore.case = TRUE) ~ "ASwab",
+      control_type == "Prep control" & grepl("^cswab", Subject, ignore.case = TRUE) ~ "CSwab",
+      control_type == "Prep control" & grepl("^etube", Subject, ignore.case = TRUE) ~ "ETube",
+      control_type == "Air Swab" ~ "Air Swab",
+      TRUE ~ sample_type
+    ),
+    DNA_ng_uL = as.numeric(DNA_ng_uL),
+    Mol_Conc_nM = as.numeric(Mol_Conc_nM),
+    Total_uL = as.numeric(Total_uL),
+    reads = sample_sums(phy)[SampleID]
+  )
+
+sample_data(phy)$sample_type <- sample_info$sample_type[
+  match(sample_names(phy), sample_info$SampleID)
+]
+sample_data(phy)$prep_site <- sample_info$prep_site[
+  match(sample_names(phy), sample_info$SampleID)
+]
+
+sample_overview <- sample_info |>
+  dplyr::count(Cycle, sample_type, control_type, name = "n_samples") |>
+  dplyr::arrange(Cycle, sample_type, control_type)
+
+read_overview <- sample_info |>
+  dplyr::group_by(sample_type) |>
+  dplyr::summarise(
+    n_samples = dplyr::n(),
+    median_reads = median(reads),
+    min_reads = min(reads),
+    max_reads = max(reads),
+    .groups = "drop"
+  )
+
+readr::write_csv(sample_overview, file.path(results_dir, "02_sample_overview.csv"))
+readr::write_csv(read_overview, file.path(results_dir, "02_read_overview.csv"))
+
+knitr::kable(sample_overview)
+knitr::kable(read_overview)
+```
+
+```{r library-size, fig.width=8, fig.height=4.5}
+# 검체 유형과 Cycle에 따른 sequencing depth를 먼저 확인한다.
+library_size_plot <- sample_info |>
+  dplyr::filter(sample_type != "Positive control") |>
+  ggplot(aes(x = sample_type, y = reads, color = Cycle)) +
+  geom_boxplot(outlier.shape = NA, color = "grey40") +
+  geom_jitter(width = 0.15, size = 2.2, alpha = 0.8) +
+  scale_y_log10(labels = scales::label_comma()) +
+  scale_color_manual(values = c("1" = "#0072B2", "2" = "#D55E00", "3" = "#009E73")) +
+  labs(x = NULL, y = "Number of reads", color = "Cycle") +
+  theme_classic() +
+  theme(legend.position = "right")
+
+ggsave(
+  file.path(results_dir, "02_library_size.png"),
+  library_size_plot,
+  width = 8,
+  height = 4.5,
+  dpi = 300
+)
+
+library_size_plot
+```
+
+## Top 50 Species heatmap
+
+```{r heatmap-data}
+# 양성 대조군을 제외하고 NC와 피부 검체를 사용한다.
+heatmap_info <- sample_info |>
+  dplyr::filter(sample_type %in% c("NC", "True"))
+
+heatmap_phy <- prune_samples(heatmap_info$SampleID, phy)
+heatmap_phy <- prune_taxa(taxa_sums(heatmap_phy) > 0, heatmap_phy)
+
+count_table <- as(otu_table(heatmap_phy), "matrix")
+if (taxa_are_rows(heatmap_phy)) {
+  count_table <- t(count_table)
+}
+
+taxonomy <- data.frame(tax_table(heatmap_phy), check.names = FALSE) |>
+  tibble::rownames_to_column("ASV") |>
+  dplyr::mutate(
+    Species = dplyr::case_when(
+      !is.na(Species) & Species != "" ~ as.character(Species),
+      !is.na(Genus) & Genus != "" ~ paste0(Genus, " sp."),
+      !is.na(Family) & Family != "" ~ paste0(Family, " (unclassified)"),
+      TRUE ~ "Unclassified"
+    )
+  )
+
+species_name <- taxonomy$Species[match(colnames(count_table), taxonomy$ASV)]
+species_count <- t(rowsum(t(count_table), group = species_name, reorder = FALSE))
+species_relative <- species_count / rowSums(species_count)
+
+nc_ids <- heatmap_info |>
+  dplyr::filter(sample_type == "NC") |>
+  dplyr::pull(SampleID)
+
+top_species <- species_relative[nc_ids, , drop = FALSE] |>
+  colMeans() |>
+  sort(decreasing = TRUE) |>
+  head(50) |>
+  names()
+
+species_clr <- log(species_count[, top_species, drop = FALSE] + 0.5)
+species_clr <- species_clr - rowMeans(species_clr)
+
+top_species_table <- tibble::tibble(
+  Species = top_species,
+  NC_mean_relative_abundance = colMeans(species_relative[nc_ids, top_species, drop = FALSE]),
+  NC_prevalence = colSums(species_count[nc_ids, top_species, drop = FALSE] > 0),
+  NC_reads = colSums(species_count[nc_ids, top_species, drop = FALSE])
+)
+
+readr::write_csv(top_species_table, file.path(results_dir, "02_NC_top50_species.csv"))
+```
+
+```{r heatmap-colors}
+# 범주형 annotation은 기존 분석에서 사용하던 RColorBrewer 계열을 적용한다.
+cycle_color <- c("1" = "#0072B2", "2" = "#D55E00", "3" = "#009E73")
+
+subject_level <- sort(unique(heatmap_info$Subject))
+subject_color <- grDevices::colorRampPalette(RColorBrewer::brewer.pal(12, "Paired"))(
+  length(subject_level)
+)
+names(subject_color) <- subject_level
+
+site_level <- sort(unique(heatmap_info$Site))
+site_color <- grDevices::colorRampPalette(RColorBrewer::brewer.pal(9, "Set1"))(
+  length(site_level)
+)
+names(site_color) <- site_level
+
+control_level <- sort(unique(heatmap_info$control_type))
+control_color <- grDevices::colorRampPalette(RColorBrewer::brewer.pal(8, "Dark2"))(
+  length(control_level)
+)
+names(control_color) <- control_level
+
+dna_color <- circlize::colorRamp2(
+  range(heatmap_info$DNA_ng_uL, na.rm = TRUE),
+  c("#FFF5EB", "#A63603")
+)
+mol_color <- circlize::colorRamp2(
+  range(heatmap_info$Mol_Conc_nM, na.rm = TRUE),
+  c("#F7FBFF", "#08519C")
+)
+total_color <- circlize::colorRamp2(
+  range(heatmap_info$Total_uL, na.rm = TRUE),
+  c("#F7FCF5", "#006D2C")
+)
+```
+
+```{r heatmap-function}
+# 동일한 형식의 heatmap을 Total, NC, True에서 반복하므로 함수로 정리한다.
+draw_species_heatmap <- function(sample_ids, title, show_sample_name = FALSE) {
+  meta <- heatmap_info |>
+    dplyr::filter(SampleID %in% sample_ids)
+
+  z_table <- t(scale(t(t(species_clr[meta$SampleID, , drop = FALSE]))))
+  z_table[!is.finite(z_table)] <- 0
+  z_table[z_table > 3] <- 3
+  z_table[z_table < -3] <- -3
+
+  annotation <- data.frame(
+    Cycle = meta$Cycle,
+    Subject = meta$Subject,
+    Site = meta$Site,
+    control_type = meta$control_type,
+    DNA_ng_uL = meta$DNA_ng_uL,
+    Mol_Conc_nM = meta$Mol_Conc_nM,
+    Total_uL = meta$Total_uL,
+    row.names = meta$SampleID,
+    check.names = FALSE
+  )
+
+  top_annotation <- ComplexHeatmap::HeatmapAnnotation(
+    df = annotation,
+    col = list(
+      Cycle = cycle_color,
+      Subject = subject_color,
+      Site = site_color,
+      control_type = control_color,
+      DNA_ng_uL = dna_color,
+      Mol_Conc_nM = mol_color,
+      Total_uL = total_color
+    ),
+    simple_anno_size = grid::unit(3, "mm")
+  )
+
+  ComplexHeatmap::Heatmap(
+    z_table,
+    name = "CLR z score",
+    col = circlize::colorRamp2(c(-3, 0, 3), c("#2166AC", "white", "#B2182B")),
+    top_annotation = top_annotation,
+    cluster_rows = TRUE,
+    cluster_columns = TRUE,
+    show_column_names = show_sample_name,
+    column_names_rot = 90,
+    column_names_gp = grid::gpar(fontsize = 7),
+    row_names_gp = grid::gpar(fontsize = 7),
+    row_title = title,
+    border = TRUE,
+    use_raster = FALSE
+  )
+}
+```
+
+```{r species-heatmaps, fig.width=16, fig.height=10}
+# Cycle은 annotation으로만 표시하고 sample 정렬 기준으로 사용하지 않는다.
+heatmap_total <- draw_species_heatmap(
+  heatmap_info$SampleID,
+  "Total: NC ranked top 50 Species"
+)
+heatmap_nc <- draw_species_heatmap(
+  heatmap_info$SampleID[heatmap_info$sample_type == "NC"],
+  "NC: NC ranked top 50 Species",
+  TRUE
+)
+heatmap_true <- draw_species_heatmap(
+  heatmap_info$SampleID[heatmap_info$sample_type == "True"],
+  "True samples: NC ranked top 50 Species"
+)
+
+png(file.path(results_dir, "02_heatmap_species_total.png"), 4800, 3000, res = 300)
+ComplexHeatmap::draw(heatmap_total)
+dev.off()
+
+png(file.path(results_dir, "02_heatmap_species_NC.png"), 3600, 3000, res = 300)
+ComplexHeatmap::draw(heatmap_nc)
+dev.off()
+
+png(file.path(results_dir, "02_heatmap_species_True.png"), 4800, 3000, res = 300)
+ComplexHeatmap::draw(heatmap_true)
+dev.off()
+
+ComplexHeatmap::draw(heatmap_total)
+ComplexHeatmap::draw(heatmap_nc)
+ComplexHeatmap::draw(heatmap_true)
+```
+
+## Bray Curtis PCoA with density plots
+
+```{r pcoa-function}
+# Total, NC, Prep control, True에 같은 PCoA 형식을 사용한다.
+pcoa_density <- function(sample_ids, title, shape_var) {
+  panel_phy <- prune_samples(sample_ids, phy)
+  panel_phy <- prune_taxa(taxa_sums(panel_phy) > 0, panel_phy)
+  panel_phy <- transform_sample_counts(panel_phy, function(x) x / sum(x))
+
+  distance <- phyloseq::distance(panel_phy, method = "bray")
+  ordination <- ordinate(panel_phy, method = "PCoA", distance = distance)
+  variance <- round(ordination$values$Relative_eig[1:2] * 100, 1)
+
+  score <- data.frame(ordination$vectors[, 1:2]) |>
+    tibble::rownames_to_column("SampleID") |>
+    dplyr::left_join(sample_info, by = "SampleID")
+
+  main_plot <- ggplot(score, aes(x = Axis.1, y = Axis.2, color = Cycle)) +
+    geom_vline(xintercept = 0, color = "grey85") +
+    geom_hline(yintercept = 0, color = "grey85") +
+    geom_point(aes(shape = .data[[shape_var]]), size = 3, alpha = 0.8) +
+    scale_color_manual(values = cycle_color) +
+    labs(
+      title = title,
+      x = paste0("PCoA1 (", variance[1], "%)"),
+      y = paste0("PCoA2 (", variance[2], "%)"),
+      color = "Cycle",
+      shape = NULL
+    ) +
+    theme_classic() +
+    theme(legend.position = "bottom")
+
+  density_score <- score |>
+    dplyr::group_by(Cycle) |>
+    dplyr::filter(dplyr::n() > 1) |>
+    dplyr::ungroup()
+
+  x_density <- cowplot::axis_canvas(main_plot, axis = "x") +
+    geom_density(
+      data = density_score,
+      aes(x = Axis.1, fill = Cycle, color = Cycle),
+      alpha = 0.25,
+      linewidth = 0.4
+    ) +
+    scale_fill_manual(values = cycle_color) +
+    scale_color_manual(values = cycle_color)
+
+  y_density <- cowplot::axis_canvas(main_plot, axis = "y", coord_flip = TRUE) +
+    geom_density(
+      data = density_score,
+      aes(x = Axis.2, fill = Cycle, color = Cycle),
+      alpha = 0.25,
+      linewidth = 0.4
+    ) +
+    scale_fill_manual(values = cycle_color) +
+    scale_color_manual(values = cycle_color) +
+    coord_flip()
+
+  plot <- main_plot |>
+    cowplot::insert_xaxis_grob(x_density, grid::unit(0.75, "in"), position = "top") |>
+    cowplot::insert_yaxis_grob(y_density, grid::unit(0.75, "in"), position = "right") |>
+    cowplot::ggdraw()
+
+  list(plot = plot, score = score)
+}
+```
+
+```{r pcoa-plots, fig.width=15, fig.height=12}
+analysis_ids <- sample_info |>
+  dplyr::filter(sample_type %in% c("NC", "True")) |>
+  dplyr::pull(SampleID)
+
+total_pcoa <- pcoa_density(analysis_ids, "Total", "sample_type")
+nc_pcoa <- pcoa_density(
+  sample_info$SampleID[sample_info$sample_type == "NC"],
+  "NC",
+  "prep_site"
+)
+prep_pcoa <- pcoa_density(
+  sample_info$SampleID[sample_info$control_type == "Prep control"],
+  "Prep control",
+  "prep_site"
+)
+true_pcoa <- pcoa_density(
+  sample_info$SampleID[sample_info$sample_type == "True"],
+  "True samples",
+  "Subject"
+)
+
+pcoa_plot <- cowplot::plot_grid(
+  total_pcoa$plot,
+  nc_pcoa$plot,
+  prep_pcoa$plot,
+  true_pcoa$plot,
+  labels = c("A", "B", "C", "D"),
+  ncol = 2
+)
+
+pcoa_score <- dplyr::bind_rows(
+  dplyr::mutate(total_pcoa$score, panel = "Total"),
+  dplyr::mutate(nc_pcoa$score, panel = "NC"),
+  dplyr::mutate(prep_pcoa$score, panel = "Prep control"),
+  dplyr::mutate(true_pcoa$score, panel = "True")
+)
+
+readr::write_csv(pcoa_score, file.path(results_dir, "02_PCoA_scores.csv"))
+ggsave(file.path(results_dir, "02_PCoA_density.png"), pcoa_plot, width = 15, height = 12, dpi = 300)
+
+pcoa_plot
+```
+
+# 2) Basic analysis
+
+## Taxonomy bar plot
+
+```{r taxonomy-barplot-data}
+# sample별 상대풍부도를 계산하고 functions.R의 taxa_plot 형식을 적용한다.
+bar_phy <- prune_samples(
+  sample_info$SampleID[sample_info$sample_type %in% c("NC", "True")],
+  phy
+)
+bar_phy <- transform_sample_counts(bar_phy, function(x) x / sum(x))
+bar_genus <- tax_glom(bar_phy, taxrank = "Genus")
+
+top_genus_otu <- taxa_sums(bar_genus) |>
+  sort(decreasing = TRUE) |>
+  head(20) |>
+  names()
+
+genus_result <- taxa_plot(
+  melt = psmelt(bar_genus),
+  taxa = "Genus",
+  tax_otu = top_genus_otu,
+  x_axis = "Sample"
+)
+
+bar_data <- genus_result$data$df
+readr::write_csv(bar_data, file.path(results_dir, "02_taxonomy_barplot_data.csv"))
+```
+
+```{r taxonomy-barplot, fig.width=15, fig.height=7}
+taxonomy_barplot <- genus_result$plot +
+  facet_wrap(
+    vars(sample_type, Cycle),
+    scales = "free_x",
+    ncol = 3
+  ) +
+  scale_y_continuous(labels = scales::label_percent()) +
+  labs(x = NULL, y = "Relative abundance", fill = "Genus") +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 7),
+    strip.background = element_rect(fill = "white", color = "grey50"),
+    legend.position = "right"
+  )
+
+ggsave(
+  file.path(results_dir, "02_taxonomy_barplot_genus.png"),
+  taxonomy_barplot,
+  width = 15,
+  height = 7,
+  dpi = 300
+)
+
+taxonomy_barplot
+```
+
+```{r session-info}
+sessionInfo()
+```

@@ -1,9 +1,9 @@
 #' Run a complete decontam threshold QC workflow
 #'
-#' One-call interface for a phyloseq object. It calculates prevalence scores,
-#' evaluates every supplied threshold, filters the object at every threshold,
-#' summarizes QC metrics, and prepares threshold-specific plots. The function
-#' does not select or compare a preferred threshold.
+#' One-call interface for a phyloseq object. It evaluates the requested
+#' `decontam` method at every supplied threshold, filters the object at every
+#' threshold, summarizes QC metrics, and prepares threshold-specific plots.
+#' The function does not select or compare a preferred threshold.
 #'
 #' @param ps A phyloseq object.
 #' @inheritParams run_decontam_threshold_sweep
@@ -41,6 +41,11 @@ run_decontam_qc <- function(ps,
                             batch = NULL,
                             batch_combine = c("minimum", "product", "fisher"),
                             normalize = TRUE,
+                            method = c(
+                              "prevalence", "frequency", "combined",
+                              "minimum", "either", "both", "auto"
+                            ),
+                            concentration_column = NULL,
                             top_n_flagged = 20L,
                             top_n_composition = 15L,
                             prevalence_pseudocount = 0.5,
@@ -81,7 +86,9 @@ run_decontam_qc <- function(ps,
     thresholds = thresholds,
     batch = batch,
     batch_combine = match.arg(batch_combine),
-    normalize = normalize
+    normalize = normalize,
+    method = method,
+    concentration_column = concentration_column
   )
   update_progress()
   threshold_names <- format(thresholds, trim = TRUE, scientific = FALSE)
@@ -105,7 +112,7 @@ run_decontam_qc <- function(ps,
       match(flags$feature_id, result$feature_summary$feature_id),
       , drop = FALSE
     ]
-    out$threshold <- threshold
+    out$threshold <- rep(threshold, nrow(out))
     out[, c("threshold", setdiff(names(out), "threshold")), drop = FALSE]
   })
   flagged_features <- do.call(rbind, flagged_feature_parts)
@@ -113,7 +120,7 @@ run_decontam_qc <- function(ps,
 
   flagged_taxa_parts <- lapply(thresholds, function(threshold) {
     out <- summarize_flagged_taxa(result, threshold, taxonomy)
-    out$threshold <- threshold
+    out$threshold <- rep(threshold, nrow(out))
     out[, c("threshold", setdiff(names(out), "threshold")), drop = FALSE]
   })
   flagged_taxa <- do.call(rbind, flagged_taxa_parts)
@@ -196,6 +203,9 @@ run_decontam_qc <- function(ps,
 #' @export
 print.decontam_qc <- function(x, ...) {
   cat("Complete decontam threshold QC\n")
+  if (!is.null(x$result$method)) {
+    cat("  method: ", x$result$method, "\n", sep = "")
+  }
   cat("  thresholds: ", paste(x$thresholds, collapse = ", "), "\n", sep = "")
   cat("  filtered phyloseq objects: ", length(x$filtered_phyloseq_by_threshold),
       "\n", sep = "")

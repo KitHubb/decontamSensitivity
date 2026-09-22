@@ -13,6 +13,8 @@ run_decontam_qc(
   batch = NULL,
   batch_combine = c("minimum", "product", "fisher"),
   normalize = TRUE,
+  method = c("prevalence", "frequency", "combined", "minimum", "either", "both", "auto"),
+  concentration_column = NULL,
   top_n_flagged = 20L,
   top_n_composition = 15L,
   prevalence_pseudocount = 0.5,
@@ -38,6 +40,12 @@ run_decontam_qc(
 
 \item{normalize}{Passed to \code{\link[decontam:isContaminant]{decontam::isContaminant()}}.}
 
+\item{method}{One of \code{"auto"}, \code{"frequency"}, \code{"prevalence"},
+\code{"combined"}, \code{"minimum"}, \code{"either"}, or \code{"both"}.}
+
+\item{concentration_column}{Sample-data column containing positive numeric
+DNA concentrations. Required by every method with a frequency component.}
+
 \item{top_n_flagged}{Maximum flagged taxa shown in each read-count plot.}
 
 \item{top_n_composition}{Number of taxa shown individually in each
@@ -59,10 +67,10 @@ An object of class \code{decontam_qc} containing results, a named list of
 filtered phyloseq objects, summary tables, and threshold-specific plots.
 }
 \description{
-One-call interface for a phyloseq object. It calculates prevalence scores,
-evaluates every supplied threshold, filters the object at every threshold,
-summarizes QC metrics, and prepares threshold-specific plots. The function
-does not select or compare a preferred threshold.
+One-call interface for a phyloseq object. It evaluates the requested
+\code{decontam} method at every supplied threshold, filters the object at every
+threshold, summarizes QC metrics, and prepares threshold-specific plots.
+The function does not select or compare a preferred threshold.
 }
 \examples{
 \dontrun{

@@ -1,0 +1,5 @@
+overlap_group,n_ASVs,percent_of_cell_candidates
+Cell mix only,31,41.333333333333336
+Cell mix + Prevalence,7,9.333333333333334
+Cell mix + Frequency,10,13.333333333333334
+All three,27,36

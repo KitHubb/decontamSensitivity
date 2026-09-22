@@ -1,0 +1,4 @@
+sample_type,n_samples,median_reads,min_reads,max_reads
+NC,14,8686.5,4484,13734
+Positive control,4,44871.5,39637,52189
+True,55,42251,3500,64346

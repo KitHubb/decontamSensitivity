@@ -1,0 +1,67 @@
+batch_mode,batch_definition,control_scenario,control_definition,threshold,prevalence_only,overlap,frequency_only,jaccard
+cycle_batch,Cycle aware,air_swab_only,Air Swab only,0.01,10,0,8,0
+cycle_batch,Cycle aware,air_swab_only,Air Swab only,0.05,26,1,42,0.014492753623188406
+cycle_batch,Cycle aware,air_swab_only,Air Swab only,0.1,80,12,69,0.07453416149068323
+cycle_batch,Cycle aware,air_swab_only,Air Swab only,0.2,126,55,113,0.1870748299319728
+cycle_batch,Cycle aware,air_swab_only,Air Swab only,0.30000000000000004,102,117,176,0.29620253164556964
+cycle_batch,Cycle aware,air_swab_only,Air Swab only,0.4,89,160,249,0.321285140562249
+cycle_batch,Cycle aware,air_swab_only,Air Swab only,0.5,53,215,525,0.27112232030264816
+cycle_batch,Cycle aware,air_swab_only,Air Swab only,0.6,155,736,261,0.6388888888888888
+cycle_batch,Cycle aware,air_swab_only,Air Swab only,0.7000000000000001,122,1021,80,0.8348323793949305
+cycle_batch,Cycle aware,air_swab_only,Air Swab only,0.8,70,1132,29,0.9195775792038993
+cycle_batch,Cycle aware,air_swab_only,Air Swab only,0.9,32,1196,3,0.9715678310316815
+cycle_batch,Cycle aware,prep_and_air_swab,Prep control + Air Swab,0.01,52,0,9,0
+cycle_batch,Cycle aware,prep_and_air_swab,Prep control + Air Swab,0.05,118,11,46,0.06285714285714286
+cycle_batch,Cycle aware,prep_and_air_swab,Prep control + Air Swab,0.1,160,30,71,0.11494252873563218
+cycle_batch,Cycle aware,prep_and_air_swab,Prep control + Air Swab,0.2,189,84,105,0.2222222222222222
+cycle_batch,Cycle aware,prep_and_air_swab,Prep control + Air Swab,0.30000000000000004,214,149,162,0.2838095238095238
+cycle_batch,Cycle aware,prep_and_air_swab,Prep control + Air Swab,0.4,195,222,218,0.34960629921259845
+cycle_batch,Cycle aware,prep_and_air_swab,Prep control + Air Swab,0.5,146,301,459,0.3322295805739514
+cycle_batch,Cycle aware,prep_and_air_swab,Prep control + Air Swab,0.6,106,358,668,0.31625441696113077
+cycle_batch,Cycle aware,prep_and_air_swab,Prep control + Air Swab,0.7000000000000001,127,788,354,0.6209613869188337
+cycle_batch,Cycle aware,prep_and_air_swab,Prep control + Air Swab,0.8,97,1013,196,0.7756508422664625
+cycle_batch,Cycle aware,prep_and_air_swab,Prep control + Air Swab,0.9,47,1233,40,0.9340909090909091
+cycle_batch,Cycle aware,prep_control_only,Prep control only,0.01,47,0,7,0
+cycle_batch,Cycle aware,prep_control_only,Prep control only,0.05,95,9,42,0.06164383561643835
+cycle_batch,Cycle aware,prep_control_only,Prep control only,0.1,129,18,68,0.08372093023255814
+cycle_batch,Cycle aware,prep_control_only,Prep control only,0.2,189,59,102,0.16857142857142857
+cycle_batch,Cycle aware,prep_control_only,Prep control only,0.30000000000000004,210,130,144,0.26859504132231404
+cycle_batch,Cycle aware,prep_control_only,Prep control only,0.4,166,197,217,0.3396551724137931
+cycle_batch,Cycle aware,prep_control_only,Prep control only,0.5,127,252,479,0.2937062937062937
+cycle_batch,Cycle aware,prep_control_only,Prep control only,0.6,87,308,692,0.28334866605335784
+cycle_batch,Cycle aware,prep_control_only,Prep control only,0.7000000000000001,122,866,252,0.6983870967741935
+cycle_batch,Cycle aware,prep_control_only,Prep control only,0.8,89,1090,98,0.8535630383711824
+cycle_batch,Cycle aware,prep_control_only,Prep control only,0.9,45,1209,27,0.9437939110070258
+pooled,Pooled,air_swab_only,Air Swab only,0.01,8,0,3,0
+pooled,Pooled,air_swab_only,Air Swab only,0.05,29,0,32,0
+pooled,Pooled,air_swab_only,Air Swab only,0.1,75,8,49,0.06060606060606061
+pooled,Pooled,air_swab_only,Air Swab only,0.2,121,31,115,0.11610486891385768
+pooled,Pooled,air_swab_only,Air Swab only,0.30000000000000004,137,72,209,0.1722488038277512
+pooled,Pooled,air_swab_only,Air Swab only,0.4,126,106,314,0.19413919413919414
+pooled,Pooled,air_swab_only,Air Swab only,0.5,102,169,530,0.21098626716604243
+pooled,Pooled,air_swab_only,Air Swab only,0.6,169,502,510,0.42506350550381033
+pooled,Pooled,air_swab_only,Air Swab only,0.7000000000000001,192,899,281,0.6552478134110787
+pooled,Pooled,air_swab_only,Air Swab only,0.8,134,1169,123,0.8197755960729313
+pooled,Pooled,air_swab_only,Air Swab only,0.9,60,1331,39,0.9307692307692308
+pooled,Pooled,prep_and_air_swab,Prep control + Air Swab,0.01,34,0,4,0
+pooled,Pooled,prep_and_air_swab,Prep control + Air Swab,0.05,86,4,22,0.03571428571428571
+pooled,Pooled,prep_and_air_swab,Prep control + Air Swab,0.1,123,18,40,0.09944751381215469
+pooled,Pooled,prep_and_air_swab,Prep control + Air Swab,0.2,146,44,98,0.1527777777777778
+pooled,Pooled,prep_and_air_swab,Prep control + Air Swab,0.30000000000000004,187,82,177,0.18385650224215247
+pooled,Pooled,prep_and_air_swab,Prep control + Air Swab,0.4,227,141,256,0.22596153846153846
+pooled,Pooled,prep_and_air_swab,Prep control + Air Swab,0.5,218,198,458,0.22654462242562928
+pooled,Pooled,prep_and_air_swab,Prep control + Air Swab,0.6,204,247,700,0.2145960034752389
+pooled,Pooled,prep_and_air_swab,Prep control + Air Swab,0.7000000000000001,221,616,531,0.4502923976608187
+pooled,Pooled,prep_and_air_swab,Prep control + Air Swab,0.8,184,854,421,0.5853324194653873
+pooled,Pooled,prep_and_air_swab,Prep control + Air Swab,0.9,97,1191,212,0.794
+pooled,Pooled,prep_control_only,Prep control only,0.01,40,0,3,0
+pooled,Pooled,prep_control_only,Prep control only,0.05,83,2,22,0.018691588785046728
+pooled,Pooled,prep_control_only,Prep control only,0.1,98,9,41,0.060810810810810814
+pooled,Pooled,prep_control_only,Prep control only,0.2,156,40,96,0.136986301369863
+pooled,Pooled,prep_control_only,Prep control only,0.30000000000000004,208,81,161,0.18
+pooled,Pooled,prep_control_only,Prep control only,0.4,209,125,258,0.21114864864864866
+pooled,Pooled,prep_control_only,Prep control only,0.5,203,173,462,0.2064439140811456
+pooled,Pooled,prep_control_only,Prep control only,0.6,173,228,710,0.20522052205220523
+pooled,Pooled,prep_control_only,Prep control only,0.7000000000000001,235,715,410,0.5257352941176471
+pooled,Pooled,prep_control_only,Prep control only,0.8,187,963,295,0.6664359861591695
+pooled,Pooled,prep_control_only,Prep control only,0.9,93,1244,129,0.8485675306957708
