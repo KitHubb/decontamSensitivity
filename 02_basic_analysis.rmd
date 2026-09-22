@@ -96,11 +96,168 @@ read_overview <- sample_info |>
     .groups = "drop"
   )
 
+# 01_preprocessing 결과의 전체 및 주요 검체군 sequencing depth를 Mean ± SD로 정리한다.
+read_depth_summary <- dplyr::bind_rows(
+  sample_info |>
+    dplyr::summarise(
+      sample_group = "Total",
+      n_samples = dplyr::n(),
+      mean_reads = mean(reads),
+      sd_reads = stats::sd(reads)
+    ),
+  sample_info |>
+    dplyr::mutate(
+      sample_group = dplyr::case_when(
+        sample_type == "True" ~ "True sample",
+        sample_type == "NC" ~ "Control",
+        sample_type == "Positive control" ~ "Mock"
+      )
+    ) |>
+    dplyr::group_by(sample_group) |>
+    dplyr::summarise(
+      n_samples = dplyr::n(),
+      mean_reads = mean(reads),
+      sd_reads = stats::sd(reads),
+      .groups = "drop"
+    )
+) |>
+  dplyr::mutate(
+    sample_group = factor(
+      sample_group,
+      levels = c("Total", "True sample", "Control", "Mock")
+    ),
+    mean_sd_reads = paste0(
+      scales::comma(round(mean_reads)),
+      " ± ",
+      scales::comma(round(sd_reads))
+    )
+  ) |>
+  dplyr::arrange(sample_group)
+
+otu_matrix <- as(otu_table(phy), "matrix")
+if (!taxa_are_rows(phy)) {
+  otu_matrix <- t(otu_matrix)
+}
+
+true_sample_ids <- sample_info |>
+  dplyr::filter(sample_type == "True") |>
+  dplyr::pull(SampleID) |>
+  intersect(colnames(otu_matrix))
+
+control_sample_ids <- sample_info |>
+  dplyr::filter(sample_type == "NC") |>
+  dplyr::pull(SampleID) |>
+  intersect(colnames(otu_matrix))
+
+mock_sample_ids <- sample_info |>
+  dplyr::filter(sample_type == "Positive control") |>
+  dplyr::pull(SampleID) |>
+  intersect(colnames(otu_matrix))
+
+sample_asv_counts <- tibble::tibble(
+  SampleID = colnames(otu_matrix),
+  observed_ASVs = colSums(otu_matrix > 0)
+) |>
+  dplyr::left_join(
+    sample_info |>
+      dplyr::select(SampleID, sample_type),
+    by = "SampleID"
+  ) |>
+  dplyr::mutate(
+    sample_group = dplyr::case_when(
+      sample_type == "True" ~ "True sample",
+      sample_type == "NC" ~ "Control",
+      sample_type == "Positive control" ~ "Mock"
+    )
+  )
+
+asv_count_summary <- tibble::tibble(
+  sample_group = c("Total", "True sample", "Control", "Mock"),
+  pooled_observed_ASVs = c(
+    sum(rowSums(otu_matrix) > 0),
+    sum(rowSums(otu_matrix[, true_sample_ids, drop = FALSE]) > 0),
+    sum(rowSums(otu_matrix[, control_sample_ids, drop = FALSE]) > 0),
+    sum(rowSums(otu_matrix[, mock_sample_ids, drop = FALSE]) > 0)
+  )
+) |>
+  dplyr::left_join(
+    dplyr::bind_rows(
+      sample_asv_counts |>
+        dplyr::summarise(
+          sample_group = "Total",
+          n_samples = dplyr::n(),
+          mean_sample_ASVs = mean(observed_ASVs),
+          sd_sample_ASVs = stats::sd(observed_ASVs)
+        ),
+      sample_asv_counts |>
+        dplyr::group_by(sample_group) |>
+        dplyr::summarise(
+          n_samples = dplyr::n(),
+          mean_sample_ASVs = mean(observed_ASVs),
+          sd_sample_ASVs = stats::sd(observed_ASVs),
+          .groups = "drop"
+        )
+    ),
+    by = "sample_group"
+  ) |>
+  dplyr::mutate(
+    sample_group = factor(
+      sample_group,
+      levels = c("Total", "True sample", "Control", "Mock")
+    ),
+    mean_sd_sample_ASVs = paste0(
+      scales::comma(round(mean_sample_ASVs)),
+      " ± ",
+      scales::comma(round(sd_sample_ASVs))
+    )
+  ) |>
+  dplyr::arrange(sample_group)
+
 readr::write_csv(sample_overview, file.path(results_dir, "02_sample_overview.csv"))
 readr::write_csv(read_overview, file.path(results_dir, "02_read_overview.csv"))
+readr::write_csv(
+  read_depth_summary,
+  file.path(results_dir, "02_read_depth_mean_sd.csv")
+)
+readr::write_csv(
+  asv_count_summary,
+  file.path(results_dir, "02_asv_count_summary.csv")
+)
 
 knitr::kable(sample_overview)
 knitr::kable(read_overview)
+knitr::kable(
+  read_depth_summary |>
+    dplyr::select(sample_group, n_samples, mean_reads, sd_reads, mean_sd_reads) |>
+    dplyr::mutate(
+      mean_reads = round(mean_reads, 1),
+      sd_reads = round(sd_reads, 1)
+    ),
+  col.names = c("Sample group", "N", "Mean reads", "SD", "Mean ± SD")
+)
+knitr::kable(
+  asv_count_summary |>
+    dplyr::select(
+      sample_group,
+      n_samples,
+      pooled_observed_ASVs,
+      mean_sample_ASVs,
+      sd_sample_ASVs,
+      mean_sd_sample_ASVs
+    ) |>
+    dplyr::mutate(
+      mean_sample_ASVs = round(mean_sample_ASVs, 1),
+      sd_sample_ASVs = round(sd_sample_ASVs, 1)
+    ),
+  col.names = c(
+    "Sample group",
+    "N",
+    "Pooled observed ASVs",
+    "Mean ASVs per sample",
+    "SD",
+    "Mean ± SD"
+  )
+)
 ```
 
 ```{r library-size, fig.width=8, fig.height=4.5}

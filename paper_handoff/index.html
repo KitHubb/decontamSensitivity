@@ -53,6 +53,19 @@
     <p>Frequency 0.4에서 상재균 감소율은 Cutibacterium 6.5%, Corynebacterium 0.8%, Lawsonella 0%였고, 대표 control taxa 감소율은 Lepagella 94.5%, Lactobacillus 86.6%, Duncaniella 61.1%였습니다.</p>
   </section>
 
+  <h2>01 Preprocessing output summary</h2>
+  <p>Preprocessing에서 생성된 phyloseq의 raw count를 사용했습니다. Pooled observed ASVs는 해당 그룹 전체에서 한 번 이상 검출된 ASV 수이며, Mean ± SD ASVs는 sample별 observed richness의 평균과 표준편차입니다.</p>
+  <table>
+    <thead><tr><th>Sample group</th><th>N</th><th>Read depth, Mean ± SD</th><th>Pooled observed ASVs</th><th>ASVs per sample, Mean ± SD</th></tr></thead>
+    <tbody>
+      <tr><td>Total</td><td>73</td><td>32,525 ± 17,926</td><td>4,633</td><td>194 ± 84</td></tr>
+      <tr><td>True sample</td><td>55</td><td>37,666 ± 15,407</td><td>4,149</td><td>216 ± 85</td></tr>
+      <tr><td>Control</td><td>14</td><td>8,650 ± 2,994</td><td>977</td><td>136 ± 34</td></tr>
+      <tr><td>Mock</td><td>4</td><td>45,392 ± 5,894</td><td>279</td><td>102 ± 17</td></tr>
+    </tbody>
+  </table>
+  <p><a class="button" href="tables/02_read_depth_mean_sd.csv">Read depth CSV</a><a class="button alt" href="tables/02_asv_count_summary.csv">ASV count CSV</a></p>
+
   <h2>전체 HTML 보고서</h2>
   <div class="reports">
     <div class="card"><h3>02 Basic analysis</h3><p>Read depth, taxonomy, heatmap, PCoA와 Cycle 구조</p><a class="button" href="reports/02_basic_analysis.html">보고서 열기</a></div>
