@@ -1,0 +1,570 @@
+---
+title: "13. Test9 original-paper figure reanalysis"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.align = "center", dpi = 150)
+library(phyloseq)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(RColorBrewer)
+set.seed(42)
+project_dir <- "D:/KSY/Project/기타/decontamSensitivity_paper/R_analysis"
+knitr::opts_knit$set(root.dir = project_dir)
+out_dir <- file.path(project_dir, "Results/Test9/13_Test9_original_paper_replication")
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+rarefaction_depth <- 5000L
+threshold <- 0.5
+write_table <- function(x, name) {
+  utils::write.csv(x, file.path(out_dir, paste0("13_", name, ".csv")), row.names = FALSE, na = "")
+}
+save_plot <- function(p, name, width = 11, height = 6) {
+  print(p)
+  ggplot2::ggsave(file.path(out_dir, paste0("13_", name, ".png")), p,
+                 width = width, height = height, dpi = 300, bg = "white")
+  ggplot2::ggsave(file.path(out_dir, paste0("13_", name, ".pdf")), p,
+                 width = width, height = height, bg = "white")
+}
+get_counts <- function(ps) {
+  x <- as(phyloseq::otu_table(ps), "matrix")
+  if (!phyloseq::taxa_are_rows(ps)) x <- t(x)
+  x
+}
+theme_set(theme_bw(base_size = 11))
+status_colors <- c(Control = "#BDBDBD", Patient = "#F7941D")
+lesion_colors <- c(Corresponding = "#55B748", Perilesional = "#ED242A", Contralateral = "#FFF12D")
+```
+
+# Scope and interpretation
+
+This is a cross-sectional, repeated-body-site reanalysis of the original BP study.
+The approved input is script 12's **pooled prevalence decontam, threshold 0.5**:
+skin swabs versus negative extraction controls. Its fitting population is retained
+before restricting to the published biological samples. Scripts 09–12 are not modified.
+
+Alpha and beta diversity use 5,000-read rarefaction **after** contaminant removal
+and biological-sample merging. Taxonomic composition and BPDAI correlations use
+unrarefied decontaminated counts converted to within-sample relative abundance.
+No additional abundance filter or batch-correction algorithm is introduced.
+
+Perilesional means skin within 2 cm of a fresh BP lesion; contralateral means
+unaffected skin on the opposite side of the same patient's body at the corresponding
+anatomical location. Corresponding samples are anatomically matched control skin.
+Site suffixes 1/2 are retained in metadata. These are sampling locations, not
+longitudinal visits. The contralateral samples are patient samples, not healthy controls.
+
+The independent DADA2 features and current taxonomy differ from the original
+analysis. Plots reproduce comparison structure, not original ASV identifiers or
+published numerical results. The original Fig. 2 used partial constrained ordination;
+the PCoA panels here are explicitly **unconstrained descriptive PCoA**.
+
+Source: [Belheouane et al., J Adv Res](https://doi.org/10.1016/j.jare.2022.03.019).
+
+# Official clinical tables and matching
+
+```{r clinical-tables}
+supp_file <- file.path(project_dir, "Input/Test9/supplementary_mmc2.xlsx")
+supp_url <- "https://ars.els-cdn.com/content/image/1-s2.0-S2090123222000819-mmc2.xlsx"
+if (!file.exists(supp_file)) download.file(supp_url, supp_file, mode = "wb")
+s1 <- readxl::read_excel(supp_file, sheet = "Table_S1 Metadata", skip = 1) |>
+  dplyr::filter(Status %in% c("Control", "Patient"), !is.na(Sample_ID))
+s5 <- readxl::read_excel(supp_file, sheet = "Table_S5 disease scores", skip = 1) |>
+  dplyr::filter(grepl("^BP_", .data[["Sample ID"]])) |>
+  dplyr::transmute(individual = .data[["Sample ID"]], BPDAI_date = Date,
+                   BPDAI = .data[["Active sum"]], BPDAI_overall = .data[["Overall sum"]],
+                   BPDAI_center = .data[["Sampling center (site abbreviation*)"]])
+if (anyDuplicated(s1$Sample_ID) || anyDuplicated(s5$individual)) {
+  stop("Official clinical keys are duplicated; resolve sample/visit identity before matching.")
+}
+write_table(data.frame(source = supp_url, file = basename(supp_file),
+                       md5 = unname(tools::md5sum(supp_file))), "supplement_source")
+knitr::kable(data.frame(table = c("S1 biological samples", "S1 individuals", "S5 BPDAI records"),
+                       n = c(nrow(s1), length(unique(s1$Individual)), nrow(s5))))
+```
+
+S5's **Active sum** is the published disease-activity value. Overall sum is retained
+for traceability but is not used as the activity endpoint. Clinical missing values
+are not imputed. BPDAI is attached by exact official individual ID; a missing BPDAI
+excludes a patient only from the BPDAI analysis.
+
+# Reproduce script 12 at threshold 0.5
+
+```{r decontam}
+ps <- readRDS(file.path(project_dir,
+  "Results/Test9/09_Test9_preprocessing/260929_Test9_phyloseq_filt.rds"))
+meta <- data.frame(sample_data(ps), check.names = FALSE)
+meta$sample_id <- rownames(meta)
+ps_decontam <- prune_samples(meta$sample_id[meta$sample_type %in%
+  c("Skin swab", "Negative Extraction Control")], ps)
+ps_decontam <- prune_taxa(taxa_sums(ps_decontam) > 0, ps_decontam)
+sample_data(ps_decontam)$decontam_group <- ifelse(
+  sample_data(ps_decontam)$sample_type == "Negative Extraction Control",
+  "Negative Extraction Control", "Skin swab")
+scores <- decontam::isContaminant(ps_decontam, method = "prevalence",
+  neg = sample_data(ps_decontam)$decontam_group == "Negative Extraction Control",
+  normalize = TRUE, detailed = TRUE)
+scores$prevalence_score <- if ("p" %in% names(scores)) scores$p else scores$p.prev
+pkgload::load_all("D:/KSY/Project/기타/decontamSensitivity", quiet = TRUE, export_all = FALSE)
+prevalence_result <- decontamSensitivity::run_threshold_sweep(
+  decontam_result = scores, count_table = get_counts(ps_decontam),
+  metadata = data.frame(sample_data(ps_decontam)), control_column = "decontam_group",
+  control_label = "Negative Extraction Control", thresholds = threshold,
+  taxonomy = data.frame(tax_table(ps_decontam)), score_column = "prevalence_score",
+  features_are_rows = TRUE)
+flags <- prevalence_result$feature_flags
+direct <- decontam::isContaminant(ps_decontam, method = "prevalence", threshold = threshold,
+  neg = sample_data(ps_decontam)$decontam_group == "Negative Extraction Control",
+  normalize = TRUE, detailed = TRUE)
+if (any(flags$contaminant != direct[flags$feature_id, "contaminant"])) {
+  stop("Threshold-sweep flags differ from the direct decontam call.")
+}
+tax <- data.frame(tax_table(ps_decontam), check.names = FALSE)
+tax$feature_id <- rownames(tax)
+write_table(dplyr::left_join(flags, tax, by = "feature_id"), "decontam_flags_0.5")
+knitr::kable(prevalence_result$threshold_summary)
+ps_clean <- prune_taxa(setdiff(taxa_names(ps_decontam), flags$feature_id[flags$contaminant]), ps_decontam)
+rm(ps, scores, direct, prevalence_result); gc()
+```
+
+The threshold-0.5 flags above are checked against a direct `decontam::isContaminant`
+call. Mock and negative sampling controls do not enter this fit, matching script 12.
+
+# Published sample intersection and sequencing-run aggregation
+
+```{r sample-matching}
+meta$official_match <- meta$sample_type == "Skin swab" &
+  tolower(as.character(meta$official_s1_sample)) == "true" &
+  meta$clinical_source_sample_id %in% s1$Sample_ID
+meta$official_match[is.na(meta$official_match)] <- FALSE
+meta$reads_before <- sample_sums(ps_decontam)[meta$sample_id]
+meta$reads_after <- sample_sums(ps_clean)[meta$sample_id]
+meta$inclusion_reason <- ifelse(meta$official_match, "Matched to official S1",
+  ifelse(meta$sample_type != "Skin swab", "Not a skin swab", "Not in official S1"))
+write_table(meta, "run_matching_and_read_retention")
+matched <- meta[meta$official_match, ]
+run_groups <- matched |>
+  dplyr::group_by(clinical_source_sample_id) |>
+  dplyr::summarise(n_runs = dplyr::n(), SRA_runs = paste(sra_run, collapse = ";"),
+    submitted_ids = paste(supplementary_sample_id, collapse = ";"),
+    match_methods = paste(unique(clinical_match_method), collapse = ";"),
+    reads_before = sum(reads_before), reads_after = sum(reads_after), .groups = "drop")
+write_table(run_groups, "biological_sample_run_mapping")
+write_table(dplyr::anti_join(s1, run_groups, by = c("Sample_ID" = "clinical_source_sample_id")),
+            "published_samples_without_current_data")
+ps_clean <- prune_samples(matched$sample_id, ps_clean)
+matched <- matched[match(sample_names(ps_clean), matched$sample_id), ]
+# Sum counts only for runs already mapped to the same original S1 biological sample.
+merged_counts <- t(rowsum(t(get_counts(ps_clean)), matched$clinical_source_sample_id, reorder = FALSE))
+bio_meta <- data.frame(s1[match(colnames(merged_counts), s1$Sample_ID), ], check.names = FALSE)
+bio_meta$individual <- bio_meta$Individual
+bio_meta$status <- factor(bio_meta$Status, levels = c("Control", "Patient"))
+bio_meta$site <- bio_meta$Site
+bio_meta$center <- bio_meta[["Sampling Center"]]
+bio_meta$sex <- bio_meta$Sex
+bio_meta$extraction_batch <- sub(
+  "^extraction", "Extraction",
+  sub("_.*$", "", bio_meta$Extraction_plate),
+  ignore.case = TRUE
+)
+bio_meta$sequencing_run <- bio_meta$Run
+bio_meta$region <- dplyr::case_when(
+  grepl("antecubital", bio_meta$site, ignore.case = TRUE) ~ "Antecubital Fossa",
+  bio_meta$site == "Upper Back" ~ "Upper Back", bio_meta$site == "Forehead" ~ "Forehead",
+  grepl("^Corresponding", bio_meta$site) ~ "Corresponding",
+  grepl("^Perilesional", bio_meta$site, ignore.case = TRUE) ~ "Perilesional",
+  grepl("^contralateral", bio_meta$site, ignore.case = TRUE) ~ "Contralateral")
+bio_meta$pair_number <- ifelse(grepl("[12]$", bio_meta$site), sub(".*([12])$", "\\1", bio_meta$site), NA)
+bio_meta$panel <- ifelse(bio_meta$region %in% c("Antecubital Fossa", "Upper Back", "Forehead"),
+                        "Standard sites", "Lesion-related sites")
+bio_meta <- dplyr::left_join(bio_meta, s5, by = "individual")
+rownames(bio_meta) <- bio_meta$Sample_ID
+ps_bio <- phyloseq(otu_table(merged_counts, taxa_are_rows = TRUE),
+                  tax_table(ps_clean), sample_data(bio_meta))
+ps_bio <- prune_samples(sample_sums(ps_bio) > 0, ps_bio)
+ps_bio <- prune_taxa(taxa_sums(ps_bio) > 0, ps_bio)
+write_table(bio_meta, "clinical_metadata_with_BPDAI")
+matching_summary <- data.frame(stage = c("Current official-matched SRA runs", "Original biological samples",
+  "Positive-depth biological samples", "Independent individuals", "Flagged ASVs"),
+  n = c(nrow(matched), nrow(bio_meta), nsamples(ps_bio), length(unique(bio_meta$individual)), sum(flags$contaminant)))
+write_table(matching_summary, "matching_summary")
+knitr::kable(matching_summary)
+knitr::kable(bio_meta |> dplyr::group_by(status, region) |>
+  dplyr::summarise(samples = dplyr::n(), individuals = dplyr::n_distinct(individual), .groups = "drop"))
+bp_match <- bio_meta |> dplyr::filter(status == "Patient") |>
+  dplyr::distinct(individual, BPDAI, BPDAI_date, center, BPDAI_center)
+write_table(bp_match, "BPDAI_patient_matching")
+knitr::kable(data.frame(BPDAI_match = c("Matched", "Missing"),
+                       patients = c(sum(!is.na(bp_match$BPDAI)), sum(is.na(bp_match$BPDAI)))))
+rm(merged_counts, ps_clean, ps_decontam); gc()
+```
+
+Run aggregation follows the existing reviewed mapping in 09. Normalized/manual
+aliases are recorded in the run mapping table; they are not newly inferred here.
+Counts are summed at the original S1 sample ID, never across body sites or patients.
+All reported biological counts are recalculated from this intersection.
+
+# Batch representation and sequencing depth
+
+```{r batch-depth, fig.width=10, fig.height=5}
+batch_tables <- list()
+for (v in c("extraction_batch", "sequencing_run")) {
+  dd <- bio_meta |> dplyr::group_by(batch = .data[[v]]) |>
+    dplyr::summarise(samples = dplyr::n(), individuals = dplyr::n_distinct(individual),
+      groups = dplyr::n_distinct(status), centers = dplyr::n_distinct(center),
+      n_Control = sum(status == "Control"), n_Patient = sum(status == "Patient"),
+      male = sum(sex == "M", na.rm = TRUE), female = sum(sex == "F", na.rm = TRUE),
+      .groups = "drop")
+  dd$variable <- v
+  batch_tables[[v]] <- dd
+}
+batch_summary <- dplyr::bind_rows(batch_tables)
+write_table(batch_summary, "batch_representation")
+knitr::kable(batch_summary)
+confounded <- batch_summary[batch_summary$groups == 1 | batch_summary$centers == 1, ]
+if (nrow(confounded)) {
+  cat(
+    "Single-group or single-center batches: ",
+    paste(paste(confounded$variable, confounded$batch), collapse = "; "),
+    ". Their batch effects cannot be interpreted independently of the corresponding group/center.\n"
+  )
+}
+depth <- data.frame(sample_data(ps_bio), check.names = FALSE)
+depth$reads <- sample_sums(ps_bio)[depth$Sample_ID]
+depth$retained_5000 <- depth$reads >= rarefaction_depth
+write_table(depth, "rarefaction_inclusion")
+save_plot(ggplot(depth, aes(reads, fill = status)) + geom_histogram(bins = 60, alpha = 0.6,
+  position = "identity") + scale_x_log10() + scale_fill_manual(values = status_colors) +
+  geom_vline(xintercept = rarefaction_depth, linetype = 2) +
+  labs(x = "Decontaminated reads per biological sample (log10)", y = "Samples", fill = NULL), "depth", 10, 5)
+knitr::kable(depth |> dplyr::group_by(status, retained_5000) |>
+  dplyr::summarise(samples = dplyr::n(), individuals = dplyr::n_distinct(individual), .groups = "drop"))
+```
+
+# Alpha diversity at 5,000 reads
+
+Boxplots display biological samples. Tests use the mean of each index per
+individual and region, avoiding duplicated evidence from two lesion locations.
+Control–patient comparisons use unpaired Wilcoxon tests. Perilesional–contralateral
+tests use patient-paired Wilcoxon tests. Control comparisons are unpaired.
+BH adjustment is applied across the planned contrasts within each index.
+
+```{r alpha, fig.width=11, fig.height=6}
+set.seed(42)
+rare_matrix <- vegan::rrarefy(t(get_counts(ps_bio)), sample = rarefaction_depth)
+ps_rare <- ps_bio
+otu_table(ps_rare) <- otu_table(t(rare_matrix), taxa_are_rows = TRUE)
+ps_rare <- prune_taxa(taxa_sums(ps_rare) > 0, ps_rare)
+if (any(sample_sums(ps_rare) != rarefaction_depth)) stop("Rarefaction depth verification failed.")
+alpha <- estimate_richness(ps_rare, measures = c("Observed", "Shannon", "Chao1"))
+alpha$Sample_ID <- rownames(alpha)
+alpha <- dplyr::left_join(alpha, bio_meta, by = "Sample_ID")
+write_table(alpha, "alpha_diversity")
+alpha_subject <- alpha |> dplyr::group_by(individual, status, region) |>
+  dplyr::summarise(dplyr::across(c(Observed, Shannon, Chao1), mean), .groups = "drop")
+alpha_tests <- list()
+for (metric in c("Shannon", "Chao1", "Observed")) {
+  for (site_name in c("Antecubital Fossa", "Upper Back", "Forehead")) {
+    dd <- alpha_subject[alpha_subject$region == site_name, ]
+    a <- dd[[metric]][dd$status == "Control"]; b <- dd[[metric]][dd$status == "Patient"]
+    alpha_tests[[length(alpha_tests) + 1]] <- data.frame(metric, comparison = paste(site_name, "Control vs Patient"),
+      n1 = length(a), n2 = length(b), paired = FALSE, median1 = median(a), median2 = median(b),
+      p = wilcox.test(a, b, exact = FALSE)$p.value)
+  }
+  for (pair in list(c("Corresponding", "Perilesional"), c("Corresponding", "Contralateral"),
+                    c("Perilesional", "Contralateral"))) {
+    dd <- alpha_subject[alpha_subject$region %in% pair, ]
+    paired <- pair[1] == "Perilesional"
+    if (paired) {
+      wide <- dd |> dplyr::select(individual, region, dplyr::all_of(metric)) |>
+        tidyr::pivot_wider(names_from = region, values_from = dplyr::all_of(metric))
+      wide <- wide[complete.cases(wide), ]
+      a <- wide[[pair[1]]]; b <- wide[[pair[2]]]
+    } else {
+      a <- dd[[metric]][dd$region == pair[1]]; b <- dd[[metric]][dd$region == pair[2]]
+    }
+    alpha_tests[[length(alpha_tests) + 1]] <- data.frame(metric, comparison = paste(pair, collapse = " vs "),
+      n1 = length(a), n2 = length(b), paired, median1 = median(a), median2 = median(b),
+      p = wilcox.test(a, b, paired = paired, exact = FALSE)$p.value)
+  }
+  standard <- alpha[alpha$panel == "Standard sites", ]
+  standard$region <- factor(standard$region, levels = c("Antecubital Fossa", "Upper Back", "Forehead"))
+  save_plot(ggplot(standard, aes(region, .data[[metric]], fill = status)) +
+    geom_boxplot(width = 0.7, outlier.size = 0.8) + scale_fill_manual(values = status_colors) +
+    labs(x = NULL, y = metric, fill = NULL, title = paste(metric, "at standard sites"),
+         subtitle = "5,000 reads; threshold 0.5; sample-level boxplots"), paste0("alpha_", metric, "_standard"))
+  lesion <- alpha[alpha$panel == "Lesion-related sites", ]
+  lesion$region <- factor(lesion$region, levels = names(lesion_colors))
+  save_plot(ggplot(lesion, aes(region, .data[[metric]], fill = region)) +
+    geom_boxplot(width = 0.6, outlier.size = 0.8) + scale_fill_manual(values = lesion_colors) +
+    labs(x = NULL, y = metric, fill = NULL, title = paste(metric, "at lesion-related sites"),
+         subtitle = "5,000 reads; patient-paired tests are reported below"), paste0("alpha_", metric, "_lesion"))
+}
+alpha_tests <- dplyr::bind_rows(alpha_tests) |> dplyr::group_by(metric) |>
+  dplyr::mutate(q_BH = p.adjust(p, "BH")) |> dplyr::ungroup()
+write_table(alpha_tests, "alpha_tests")
+knitr::kable(alpha_tests, digits = 4)
+```
+
+# Beta diversity and PERMANOVA
+
+Bray–Curtis and binary Jaccard use the same rarefied counts. Ordination includes
+all retained biological samples. Between-patient status tests use one deterministic
+sample per individual within each region (original sample-ID order); paired lesion
+tests retain a complete numbered perilesional/contralateral pair per patient.
+For those within-patient tests only, permutations are restricted by individual.
+Status is invariant within a patient and is never tested using within-patient permutations.
+Crude and center/sex-adjusted marginal tests are reported with the actual sample
+and patient counts. Batch-alone tests and dispersion tests accompany each comparison.
+PERMANOVA may reflect dispersion as well as centroid differences.
+
+```{r beta, fig.width=11, fig.height=6, results='asis'}
+rare_counts <- t(get_counts(ps_rare))
+rare_meta <- bio_meta[match(rownames(rare_counts), bio_meta$Sample_ID), ]
+beta_result_file <- file.path(out_dir, "13_PERMANOVA_and_dispersion.csv")
+beta_images <- file.path(out_dir, c(
+  "13_PCoA_Bray-Curtis_Standard_sites.png",
+  "13_PCoA_Bray-Curtis_Standard_sites_center.png",
+  "13_PCoA_Bray-Curtis_Lesion-related_sites.png",
+  "13_PCoA_Bray-Curtis_Lesion-related_sites_center.png",
+  "13_PCoA_Jaccard_Standard_sites.png",
+  "13_PCoA_Jaccard_Standard_sites_center.png",
+  "13_PCoA_Jaccard_Lesion-related_sites.png",
+  "13_PCoA_Jaccard_Lesion-related_sites_center.png",
+  "13_PERMANOVA_R2.png"
+))
+if (file.exists(beta_result_file) && all(file.exists(beta_images))) {
+  beta_results <- utils::read.csv(beta_result_file, check.names = FALSE)
+  knitr::include_graphics(beta_images)
+} else {
+beta_results <- list()
+for (metric in c("Bray-Curtis", "Jaccard")) {
+  for (panel_name in c("Standard sites", "Lesion-related sites")) {
+    ii <- which(rare_meta$panel == panel_name)
+    x <- rare_counts[ii, , drop = FALSE]; x <- x[, colSums(x) > 0, drop = FALSE]
+    dd <- rare_meta[ii, ]
+    dst <- vegan::vegdist(x, method = if (metric == "Bray-Curtis") "bray" else "jaccard",
+                         binary = metric == "Jaccard")
+    ord <- ape::pcoa(dst, correction = "lingoes")
+    coords <- if (!is.null(ord$vectors.cor)) ord$vectors.cor[, 1:2] else ord$vectors[, 1:2]
+    eig <- if ("Rel_corr_eig" %in% names(ord$values)) ord$values$Rel_corr_eig else ord$values$Relative_eig
+    dd$PCoA1 <- coords[, 1]; dd$PCoA2 <- coords[, 2]
+    write_table(dd, paste0("PCoA_", metric, "_", gsub(" ", "_", panel_name)))
+    p <- ggplot(dd, aes(PCoA1, PCoA2)) +
+      labs(x = sprintf("PCoA1 (%.1f%%)", eig[1] * 100), y = sprintf("PCoA2 (%.1f%%)", eig[2] * 100),
+           title = paste(metric, panel_name), subtitle = "Unconstrained PCoA; Lingoes correction; rarefied to 5,000 reads")
+    if (panel_name == "Standard sites") {
+      p <- p + geom_point(aes(color = status, shape = region), alpha = 0.65, size = 1.7) +
+        scale_color_manual(values = status_colors)
+    } else {
+      p <- p + geom_point(aes(fill = region), shape = 21, color = "grey30", alpha = 0.7, size = 2) +
+        scale_fill_manual(values = lesion_colors)
+    }
+    save_plot(p, paste0("PCoA_", metric, "_", gsub(" ", "_", panel_name)))
+    save_plot(ggplot(dd, aes(PCoA1, PCoA2, color = center)) + geom_point(alpha = 0.65, size = 1.6) +
+      labs(title = paste(metric, panel_name, "by center"), x = "PCoA1", y = "PCoA2"),
+      paste0("PCoA_", metric, "_", gsub(" ", "_", panel_name), "_center"))
+  }
+  for (comparison in c("Antecubital Fossa", "Upper Back", "Forehead", "Corresponding vs Perilesional",
+                       "Corresponding vs Contralateral", "Perilesional vs Contralateral")) {
+    paired <- comparison == "Perilesional vs Contralateral"
+    if (!grepl(" vs ", comparison)) {
+      dd <- rare_meta[rare_meta$region == comparison, ]
+      dd <- dd[order(dd$Sample_ID), ]; dd <- dd[!duplicated(dd$individual), ]
+      dd$group <- droplevels(dd$status)
+    } else {
+      regions <- strsplit(comparison, " vs ", fixed = TRUE)[[1]]
+      dd <- rare_meta[rare_meta$region %in% regions, ]
+      if (paired) {
+        keys <- table(paste(dd$individual, dd$pair_number), dd$region)
+        complete_keys <- rownames(keys)[rowSums(keys > 0) == 2]
+        dd <- dd[paste(dd$individual, dd$pair_number) %in% complete_keys, ]
+        dd <- dd[order(dd$Sample_ID), ]
+        chosen <- dd[!duplicated(dd$individual), c("individual", "pair_number")]
+        dd <- dd[paste(dd$individual, dd$pair_number) %in% paste(chosen$individual, chosen$pair_number), ]
+      } else {
+        dd <- dd[order(dd$Sample_ID), ]; dd <- dd[!duplicated(dd$individual), ]
+      }
+      dd$group <- factor(dd$region, levels = regions)
+    }
+    for (model in c("batch_alone", "crude", "adjusted")) {
+      if (paired && model != "crude") next
+      fields <- if (model == "adjusted") c("center", "sex", "group") else if (model == "batch_alone") "extraction_batch" else "group"
+      d <- droplevels(dd[complete.cases(dd[, fields, drop = FALSE]), ])
+      d$center <- factor(d$center); d$sex <- factor(d$sex); d$extraction_batch <- factor(d$extraction_batch)
+      x <- rare_counts[d$Sample_ID, , drop = FALSE]; x <- x[, colSums(x) > 0, drop = FALSE]
+      dst <- vegan::vegdist(x, method = if (metric == "Bray-Curtis") "bray" else "jaccard", binary = metric == "Jaccard")
+      rhs <- if (model == "adjusted") "center + sex + group" else if (model == "batch_alone") "extraction_batch" else "group"
+      set.seed(42)
+      fit <- vegan::adonis2(as.formula(paste("dst ~", rhs)), data = d, permutations = 999,
+        by = "margin", strata = if (paired) d$individual else NULL)
+      target <- if (model == "batch_alone") "extraction_batch" else "group"
+      target_sizes <- table(d[[target]])
+      if (length(target_sizes) < 2 || any(target_sizes < 2)) {
+        dispersion_p <- NA_real_
+      } else {
+        dispers <- vegan::betadisper(dst, d[[target]], bias.adjust = FALSE, add = "lingoes")
+        set.seed(42)
+        dispersion_p <- vegan::permutest(dispers, permutations = 999)$tab[1, "Pr(>F)"]
+      }
+      beta_results[[length(beta_results) + 1]] <- data.frame(metric, comparison, model,
+        samples = nrow(d), individuals = length(unique(d$individual)), formula = rhs,
+        paired, R2 = fit[target, "R2"], F = fit[target, "F"], p = fit[target, "Pr(>F)"], dispersion_p)
+    }
+  }
+}
+beta_results <- dplyr::bind_rows(beta_results) |> dplyr::group_by(metric, model) |>
+  dplyr::mutate(q_BH = p.adjust(p, "BH")) |> dplyr::ungroup()
+write_table(beta_results, "PERMANOVA_and_dispersion")
+knitr::kable(beta_results, digits = 4)
+save_plot(ggplot(beta_results, aes(comparison, R2 * 100, fill = model)) + geom_col(position = "dodge") +
+  facet_wrap(~metric) + coord_flip() + labs(x = NULL, y = "Explained variation (%)", fill = NULL), "PERMANOVA_R2", 12, 7)
+}
+knitr::kable(beta_results, digits = 4)
+```
+
+# Taxonomic composition using unrarefied counts
+
+The genus bars use the project's existing `functions.R::taxa_plot()` implementation
+and its phylum-dependent colors. Relative abundances are averaged with equal sample
+weight within each displayed group. Samples below 5,000 reads remain eligible here
+if they have positive decontaminated depth. No additional taxa are removed for plotting;
+non-displayed genera remain in the denominator and are represented as Other.
+
+```{r taxa, fig.width=12, fig.height=8}
+# Evaluate the existing plotting function only; preserve its implementation and palettes.
+helper_expressions <- parse(file.path(project_dir, "functions.R"))
+for (expr in helper_expressions) {
+  if (is.call(expr) && as.character(expr[[1]]) %in% c("<-", "=") &&
+      identical(as.character(expr[[2]]), "taxa_plot")) eval(expr)
+}
+counts <- get_counts(ps_bio)
+rel <- sweep(counts, 2, colSums(counts), "/")
+tax <- data.frame(tax_table(ps_bio), check.names = FALSE)
+md <- data.frame(sample_data(ps_bio), check.names = FALSE)
+md$plot_group <- ifelse(md$panel == "Standard sites", paste(md$status, md$region),
+                       paste(md$status, md$region))
+group_levels <- c("Control Antecubital Fossa", "Patient Antecubital Fossa", "Control Upper Back",
+  "Patient Upper Back", "Control Forehead", "Patient Forehead", "Control Corresponding",
+  "Patient Perilesional", "Patient Contralateral")
+md$plot_group <- factor(md$plot_group, levels = group_levels)
+genus_key <- paste(tax$Phylum, tax$Genus, sep = "|")
+genus_rel <- rowsum(rel, genus_key, reorder = FALSE)
+genus_tax <- tax[match(rownames(genus_rel), genus_key), , drop = FALSE]
+top_genus_ids <- rownames(genus_rel)[order(rowMeans(genus_rel), decreasing = TRUE)[seq_len(min(20, nrow(genus_rel)))]]
+genus_mean <- vapply(group_levels, function(g) rowMeans(genus_rel[, md$plot_group == g, drop = FALSE]), numeric(nrow(genus_rel)))
+rownames(genus_mean) <- rownames(genus_rel)
+genus_long <- data.frame(genus_mean, check.names = FALSE) |>
+  tibble::rownames_to_column("OTU") |> tidyr::pivot_longer(-OTU, names_to = "plot_group", values_to = "Abundance")
+genus_long$Phylum <- genus_tax$Phylum[match(genus_long$OTU, rownames(genus_rel))]
+genus_long$Genus <- genus_tax$Genus[match(genus_long$OTU, rownames(genus_rel))]
+genus_long$plot_group <- factor(genus_long$plot_group, levels = group_levels)
+genus_long <- data.frame(genus_long, check.names = FALSE)
+genus_plot <- taxa_plot(genus_long, taxa = "Genus", tax_otu = top_genus_ids, x_axis = "plot_group")
+save_plot(genus_plot$plot + labs(title = "Mean genus composition after decontam threshold 0.5",
+  subtitle = "Unrarefied counts; existing taxa_plot colors; equal biological-sample weight", x = NULL), "genus_composition", 13, 8)
+write_table(genus_long, "genus_group_abundance")
+write_table(data.frame(label = levels(genus_plot$data$df$Genus), color = genus_plot$color), "taxa_color_mapping")
+
+# Current top ASVs are descriptive, not reidentified original indicator ASVs.
+top_asvs <- names(sort(rowMeans(rel), decreasing = TRUE))[seq_len(min(10, nrow(rel)))]
+asv_mean <- vapply(group_levels, function(g) rowMeans(rel[top_asvs, md$plot_group == g, drop = FALSE]), numeric(length(top_asvs)))
+rownames(asv_mean) <- top_asvs
+asv_long <- data.frame(asv_mean, check.names = FALSE) |> tibble::rownames_to_column("feature_id") |>
+  tidyr::pivot_longer(-feature_id, names_to = "plot_group", values_to = "Abundance")
+asv_long$Phylum <- tax$Phylum[match(asv_long$feature_id, rownames(tax))]
+asv_long$Species <- tax$Species[match(asv_long$feature_id, rownames(tax))]
+asv_long$OTU <- asv_long$feature_id
+asv_long$ASV_label <- paste(asv_long$Species, substr(asv_long$feature_id, 1, 8))
+asv_long$plot_group <- factor(asv_long$plot_group, levels = group_levels)
+asv_long <- data.frame(asv_long, check.names = FALSE)
+asv_palette <- taxa_plot(asv_long, taxa = "ASV_label", tax_otu = top_asvs, x_axis = "plot_group")
+asv_data <- asv_palette$data$df
+save_plot(ggplot(asv_data, aes(plot_group, Abundance, fill = ASV_label)) + geom_col() +
+  scale_fill_manual(values = asv_palette$color) + labs(x = NULL, y = "Mean relative abundance", fill = NULL,
+  title = "Current top 10 ASVs: original-paper comparison structure",
+  subtitle = "Descriptive ASVs; full-community denominator; not original indicator IDs") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)), "top_ASV_composition", 14, 8)
+write_table(asv_long, "top_ASV_group_abundance")
+```
+
+# BPDAI and S. aureus abundance
+
+S. aureus is identified from the current taxonomy by an exact species-name match
+and its ASVs are summed per sample. This is a species-aggregate reanalysis, not a
+claim of sequence identity with the original paper's ASV_2. 16S species assignments
+are used as provided and do not resolve strain identity.
+
+The primary correlation uses one mean abundance per patient and region, so patients
+with two lesion sites are counted once. Sample-level Spearman estimates are included
+as a descriptive comparison only. BPDAI-missing patients are listed in the matching table.
+
+```{r bpdai, fig.width=11, fig.height=5}
+species_clean <- gsub("_", " ", tax$Species)
+aureus <- rownames(tax)[species_clean == "Staphylococcus aureus"]
+write_table(data.frame(feature_id = aureus, tax[aureus, , drop = FALSE], row.names = NULL), "S_aureus_ASVs")
+if (!length(aureus)) {
+  cat("No exact Staphylococcus aureus species assignments are present; the requested species correlation cannot be estimated.\n")
+} else {
+  sa <- md
+  sa$relative_abundance <- colSums(rel[aureus, , drop = FALSE])
+  sa <- sa[sa$status == "Patient" & sa$region %in% c("Perilesional", "Contralateral") & !is.na(sa$BPDAI), ]
+  sa_subject <- sa |> dplyr::group_by(individual, region, BPDAI) |>
+    dplyr::summarise(relative_abundance = mean(relative_abundance), samples = dplyr::n(), .groups = "drop")
+  corr <- list()
+  for (unit in c("Patient mean", "Biological sample (descriptive)")) {
+    z <- if (unit == "Patient mean") sa_subject else sa
+    for (r in c("Perilesional", "Contralateral")) {
+      dd <- z[z$region == r, ]
+      ct <- cor.test(dd$BPDAI, dd$relative_abundance, method = "spearman", exact = FALSE)
+      corr[[length(corr) + 1]] <- data.frame(unit, region = r, n = nrow(dd),
+        individuals = length(unique(dd$individual)), rho = unname(ct$estimate), p = ct$p.value)
+    }
+  }
+  corr <- dplyr::bind_rows(corr) |> dplyr::group_by(unit) |>
+    dplyr::mutate(q_BH = p.adjust(p, "BH")) |> dplyr::ungroup()
+  labels <- corr[corr$unit == "Patient mean", ]
+  labels$label <- sprintf("n = %d patients\nrho = %.3f; BH q = %.3g", labels$individuals, labels$rho, labels$q_BH)
+  save_plot(ggplot(sa_subject, aes(BPDAI, relative_abundance * 100)) + geom_point(alpha = 0.6, size = 1.8) +
+    facet_wrap(~region) + geom_text(data = labels, aes(x = Inf, y = Inf, label = label), inherit.aes = FALSE,
+      hjust = 1.1, vjust = 1.2, size = 3.5, color = "blue") +
+    labs(x = "BPDAI activity score (Active sum)", y = "Mean S. aureus relative abundance (%)",
+      title = "S. aureus abundance and BP disease activity", subtitle = "One point per patient per region; unrarefied decontaminated counts"),
+    "BPDAI_S_aureus", 11, 5)
+  write_table(sa, "BPDAI_sample_abundance")
+  write_table(sa_subject, "BPDAI_patient_mean_abundance")
+  write_table(corr, "BPDAI_correlations")
+  knitr::kable(corr, digits = 4)
+}
+```
+
+# Final analysis objects and reproducibility
+
+```{r final-objects}
+saveRDS(list(unrarefied_decontam_0.5 = ps_bio, rarefied_5000 = ps_rare),
+        file.path(out_dir, "13_Test9_decontam_0.5_analysis_phyloseq.rds"))
+final_counts <- data.frame(dataset = c("Taxa/BPDAI: unrarefied", "Alpha/beta: rarefied 5000"),
+  samples = c(nsamples(ps_bio), nsamples(ps_rare)),
+  individuals = c(length(unique(sample_data(ps_bio)$individual)), length(unique(sample_data(ps_rare)$individual))),
+  ASVs = c(ntaxa(ps_bio), ntaxa(ps_rare)))
+write_table(final_counts, "final_counts")
+knitr::kable(final_counts)
+writeLines(capture.output(sessionInfo()), file.path(out_dir, "13_sessionInfo.txt"))
+sessionInfo()
+```
+
+To rerun from the R project, open this Rmd and Knit, or run:
+
+```{r render-instructions, eval=FALSE}
+rmarkdown::render("13_Test9_original_paper_replication.Rmd",
+  output_dir = "Results/Test9/13_Test9_original_paper_replication",
+  envir = new.env(parent = globalenv()))
+```
