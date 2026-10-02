@@ -1,0 +1,3 @@
+mock_type,method,TP,TN,FP,FN,Sensitivity_Recall,Specificity,Precision_PPV,F1,Youden_J
+Cell Mock,Raw: no ASV removed,0,27,0,288,0,1,NA,0,0
+DNA Mock,Raw: no ASV removed,0,8,0,87,0,1,NA,0,0

@@ -1,0 +1,1193 @@
+---
+title: "06. Test7 combined decontam and cross-method validation"
+author: "Test7 decontamination sensitivity analysis"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    self_contained: true
+    df_print: paged
+params:
+  force_recompute: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, message = FALSE, warning = FALSE,
+  fig.align = "center", fig.width = 10, fig.height = 6, dpi = 180
+)
+options(stringsAsFactors = FALSE)
+set.seed(42)
+```
+
+# 1. Analysis question
+
+This report adds the previously missing `decontam` `method = "combined"`
+analysis to Test7 and then compares the prespecified pooled combined result at
+threshold 0.5 with SCRuB and MicrobIEM. It does not select or optimize a
+threshold from the same data.
+
+The analysis follows the established Test7 definitions:
+
+- biological samples: samples that are neither negative nor positive controls;
+- negative controls: Prep controls plus Air Swabs;
+- positive controls: excluded from contaminant learning and from the primary
+  cross-method comparison;
+- concentration: `DNA_ng_uL`, with zero replaced by half the smallest positive
+  concentration, exactly as in scripts 02--04;
+- thresholds: 0.01, 0.05, and 0.1--0.9 by 0.1;
+- batch settings: pooled and `Cycle`-aware.
+
+SCRuB produces sample-specific corrected counts, whereas decontam and
+MicrobIEM produce binary ASV calls. Therefore continuous read-removal agreement
+is the primary SCRuB comparison. SCRuB binary summaries at 10%, 50%, and 90%
+removal are descriptive sensitivity analyses only.
+
+# 2. Packages and paths
+
+```{r packages-paths}
+library(phyloseq)
+library(decontam)
+library(SCRuB)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(readr)
+
+package_dir <- normalizePath(
+  file.path("..", "..", "decontamSensitivity"),
+  winslash = "/", mustWork = TRUE
+)
+devtools::load_all(package_dir, quiet = TRUE)
+
+input_path <- file.path("Phyloseq", "phy_F270R210_260921.rds")
+output_dir <- file.path("Results", "Test7", "06_combined_cross_method_validation")
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+
+microbiem_source <- paste0(
+  "D:/KSY/Project/10.AT_multicenter/Results/260909_reanalysis/",
+  "tmp/tool_sources/MicrobIEM/MicrobIEM_decontamination.R"
+)
+
+thresholds <- c(0.01, 0.05, seq(0.1, 0.9, by = 0.1))
+methods <- c("prevalence", "frequency", "combined")
+method_colors <- c(
+  Prevalence = "#1B9E77", Frequency = "#D95F02", Combined = "#7570B3",
+  `SCRuB non-spatial` = "#E7298A", `SCRuB spatial` = "#E6AB02",
+  MicrobIEM = "#66A61E"
+)
+theme_set(theme_bw(base_size = 11))
+```
+
+# 3. Input validation and exact sample scope
+
+```{r input-scope}
+stopifnot(file.exists(input_path), file.exists(microbiem_source))
+phy_input <- readRDS(input_path)
+stopifnot(inherits(phy_input, "phyloseq"))
+
+meta_original <- data.frame(sample_data(phy_input), check.names = FALSE)
+required_columns <- c(
+  "control_type", "Sample_Control", "Subject", "Cycle", "DNA_ng_uL"
+)
+if (!all(required_columns %in% colnames(meta_original))) {
+  stop("Missing metadata: ", paste(setdiff(required_columns, colnames(meta_original)), collapse = ", "))
+}
+
+sample_info <- meta_original |>
+  tibble::rownames_to_column("sample_id") |>
+  mutate(
+    Cycle = sub("\\.0$", "", as.character(Cycle)),
+    well_no = as.integer(No),
+    plate_row_no = (well_no - 1) %% 8 + 1,
+    plate_col = (well_no - 1) %/% 8 + 1,
+    plate_row = LETTERS[plate_row_no],
+    well = paste0(plate_row, plate_col),
+    is_prep_control = !is.na(control_type) & control_type == "Prep control",
+    is_air_swab = !is.na(control_type) & control_type == "Air Swab",
+    is_positive_control = !is.na(Sample_Control) & Sample_Control == "PC",
+    is_negative_control = is_prep_control | is_air_swab,
+    is_biological = !is_negative_control & !is_positive_control,
+    concentration_raw = suppressWarnings(as.numeric(DNA_ng_uL))
+  )
+
+if (anyNA(sample_info$concentration_raw) || any(sample_info$concentration_raw < 0)) {
+  stop("DNA_ng_uL must be complete, numeric, and non-negative.")
+}
+smallest_positive <- min(sample_info$concentration_raw[sample_info$concentration_raw > 0])
+zero_replacement <- smallest_positive / 2
+sample_info <- sample_info |>
+  mutate(
+    decontam_concentration = if_else(
+      concentration_raw == 0, zero_replacement, concentration_raw
+    ),
+    sample_role = case_when(
+      is_prep_control ~ "Prep control",
+      is_air_swab ~ "Air Swab",
+      is_positive_control ~ "Positive control",
+      TRUE ~ "Biological sample"
+    ),
+    decontam_group = if_else(is_negative_control, "negative_control", "biological")
+  )
+
+scope_ids <- sample_info$sample_id[
+  sample_info$is_biological | sample_info$is_negative_control
+]
+ps_scope <- prune_samples(scope_ids, phy_input)
+ps_scope <- prune_taxa(taxa_sums(ps_scope) > 0, ps_scope)
+
+scope_info <- sample_info |>
+  filter(sample_id %in% scope_ids) |>
+  arrange(match(sample_id, sample_names(ps_scope)))
+scope_meta <- meta_original[scope_info$sample_id, , drop = FALSE]
+scope_meta$Cycle <- scope_info$Cycle
+scope_meta$is_prep_control <- scope_info$is_prep_control
+scope_meta$is_air_swab <- scope_info$is_air_swab
+scope_meta$is_negative_control <- scope_info$is_negative_control
+scope_meta$is_biological <- scope_info$is_biological
+scope_meta$decontam_group <- scope_info$decontam_group
+scope_meta$concentration_raw <- scope_info$concentration_raw
+scope_meta$decontam_concentration <- scope_info$decontam_concentration
+rownames(scope_meta) <- scope_info$sample_id
+sample_data(ps_scope) <- sample_data(scope_meta)
+
+count_matrix <- as(otu_table(ps_scope), "matrix")
+if (taxa_are_rows(ps_scope)) count_matrix <- t(count_matrix)
+count_matrix <- count_matrix[sample_names(ps_scope), taxa_names(ps_scope), drop = FALSE]
+
+biological_ids <- scope_info$sample_id[scope_info$is_biological]
+prep_ids <- scope_info$sample_id[scope_info$is_prep_control]
+air_ids <- scope_info$sample_id[scope_info$is_air_swab]
+control_ids <- c(prep_ids, air_ids)
+biological_counts <- count_matrix[biological_ids, , drop = FALSE]
+
+input_summary <- data.frame(
+  item = c(
+    "Input samples", "Analysis samples", "Biological samples", "Prep controls",
+    "Air Swabs", "Positive controls excluded", "ASVs after scope pruning",
+    "Zero concentrations replaced", "Replacement concentration (ng/uL)"
+  ),
+  value = c(
+    nsamples(phy_input), nsamples(ps_scope), length(biological_ids),
+    length(prep_ids), length(air_ids), sum(sample_info$is_positive_control),
+    ntaxa(ps_scope), sum(scope_info$concentration_raw == 0), zero_replacement
+  )
+)
+write_csv(input_summary, file.path(output_dir, "06_01_input_summary.csv"))
+write_csv(
+  scope_info |> select(sample_id, sample_role, Cycle, well_no, well,
+                       plate_row_no, plate_col, DNA_ng_uL,
+                       concentration_raw, decontam_concentration),
+  file.path(output_dir, "06_02_sample_assignments.csv")
+)
+knitr::kable(input_summary, digits = 4, format.args = list(big.mark = ","))
+```
+
+```{r scope-balance}
+scope_balance <- scope_info |>
+  count(Cycle, sample_role, name = "n_samples") |>
+  complete(Cycle, sample_role, fill = list(n_samples = 0))
+write_csv(scope_balance, file.path(output_dir, "06_03_cycle_sample_balance.csv"))
+knitr::kable(scope_balance)
+```
+
+# 4. decontam prevalence, frequency, and combined sweep
+
+The three methods are rerun on the identical ASV table and controls. The
+Cycle-aware analysis passes `Cycle` directly to decontam as the batch variable;
+it is not a separate per-Cycle post hoc union.
+
+```{r decontam-sweep}
+cache_path <- file.path(output_dir, "06_decontam_sweep_cache.rds")
+cache_config <- list(
+  input_md5 = unname(tools::md5sum(input_path)), thresholds = thresholds,
+  methods = methods, package_version = as.character(packageVersion("decontamSensitivity"))
+)
+
+use_cache <- FALSE
+if (file.exists(cache_path) && !isTRUE(params$force_recompute)) {
+  cached <- readRDS(cache_path)
+  use_cache <- identical(cached$config, cache_config)
+}
+
+if (use_cache) {
+  decontam_runs <- cached$runs
+} else {
+  decontam_runs <- list()
+  for (method_name in methods) {
+    for (batch_mode in c("pooled", "cycle_aware")) {
+      args <- list(
+        ps = ps_scope,
+        control_column = "decontam_group",
+        control_label = "negative_control",
+        thresholds = thresholds,
+        method = method_name
+      )
+      if (method_name %in% c("frequency", "combined")) {
+        args$concentration_column <- "decontam_concentration"
+      }
+      if (batch_mode == "cycle_aware") args$batch <- "Cycle"
+      run_id <- paste(method_name, batch_mode, sep = "__")
+      decontam_runs[[run_id]] <- do.call(run_decontam_threshold_sweep, args)
+    }
+  }
+  saveRDS(list(config = cache_config, runs = decontam_runs), cache_path)
+}
+
+threshold_summary <- bind_rows(lapply(names(decontam_runs), function(run_id) {
+  bits <- strsplit(run_id, "__", fixed = TRUE)[[1]]
+  decontam_runs[[run_id]]$threshold_summary |>
+    mutate(method = bits[1], batch_mode = bits[2])
+})) |>
+  mutate(
+    method_label = recode(method,
+      prevalence = "Prevalence", frequency = "Frequency", combined = "Combined"),
+    batch_label = recode(batch_mode, pooled = "Pooled", cycle_aware = "Cycle-aware")
+  )
+
+feature_flags <- bind_rows(lapply(names(decontam_runs), function(run_id) {
+  bits <- strsplit(run_id, "__", fixed = TRUE)[[1]]
+  decontam_runs[[run_id]]$feature_flags |>
+    mutate(method = bits[1], batch_mode = bits[2])
+}))
+
+write_csv(threshold_summary, file.path(output_dir, "06_04_decontam_threshold_summary.csv"))
+write_csv(feature_flags, file.path(output_dir, "06_05_decontam_feature_flags.csv"))
+knitr::kable(
+  threshold_summary |>
+    filter(threshold %in% c(0.1, 0.3, 0.5, 0.7, 0.9)) |>
+    select(method_label, batch_label, threshold, contaminant_features,
+           biological_reads_retained_pct, control_reads_retained_pct,
+           zero_read_samples),
+  digits = 2
+)
+```
+
+```{r decontam-sweep-plots, fig.width=12, fig.height=8}
+p_sweep <- ggplot(
+  threshold_summary,
+  aes(threshold, contaminant_features, color = method_label)
+) +
+  geom_line(linewidth = 0.9) + geom_point(size = 2) +
+  facet_wrap(~batch_label) +
+  scale_x_continuous(breaks = thresholds) +
+  scale_color_manual(values = method_colors[c("Prevalence", "Frequency", "Combined")]) +
+  labs(
+    title = "Test7 contaminant calls across decontam methods",
+    subtitle = "Same biological samples and combined Prep-control + Air-Swab definition",
+    x = "Threshold", y = "Flagged ASVs", color = NULL
+  ) + theme(legend.position = "bottom")
+
+p_retention <- threshold_summary |>
+  select(method_label, batch_label, threshold,
+         biological_reads_retained_pct, control_reads_retained_pct) |>
+  pivot_longer(ends_with("retained_pct"), names_to = "sample_group", values_to = "retained_pct") |>
+  mutate(sample_group = recode(sample_group,
+    biological_reads_retained_pct = "Biological samples",
+    control_reads_retained_pct = "Negative controls")) |>
+  ggplot(aes(threshold, retained_pct, color = method_label)) +
+  geom_line(linewidth = 0.9) + geom_point(size = 1.8) +
+  facet_grid(sample_group ~ batch_label) +
+  scale_x_continuous(breaks = thresholds) +
+  scale_color_manual(values = method_colors[c("Prevalence", "Frequency", "Combined")]) +
+  labs(title = "Read retention after decontam calls", x = "Threshold",
+       y = "Reads retained (%)", color = NULL) +
+  theme(legend.position = "bottom")
+
+print(p_sweep)
+print(p_retention)
+ggsave(file.path(output_dir, "06_01_decontam_flagged_ASVs.png"), p_sweep,
+       width = 12, height = 5.5, dpi = 300)
+ggsave(file.path(output_dir, "06_02_decontam_read_retention.png"), p_retention,
+       width = 12, height = 8, dpi = 300)
+```
+
+## Agreement of decontam methods at threshold 0.5
+
+```{r decontam-agreement-05}
+flags_05 <- feature_flags |>
+  filter(batch_mode == "pooled", threshold == 0.5) |>
+  select(feature_id, method, contaminant) |>
+  pivot_wider(names_from = method, values_from = contaminant)
+
+binary_metrics <- function(x, y) {
+  intersection <- sum(x & y)
+  union <- sum(x | y)
+  data.frame(
+    n_method_1 = sum(x), n_method_2 = sum(y), overlap = intersection,
+    jaccard = ifelse(union == 0, NA_real_, intersection / union),
+    agreement = mean(x == y)
+  )
+}
+
+decontam_pairs <- list(c("prevalence", "frequency"),
+                       c("prevalence", "combined"),
+                       c("frequency", "combined"))
+decontam_agreement <- bind_rows(lapply(decontam_pairs, function(pair) {
+  out <- binary_metrics(flags_05[[pair[1]]], flags_05[[pair[2]]])
+  out$method_1 <- pair[1]; out$method_2 <- pair[2]; out
+})) |>
+  select(method_1, method_2, everything())
+write_csv(decontam_agreement, file.path(output_dir, "06_06_decontam_agreement_threshold_0.5.csv"))
+knitr::kable(decontam_agreement, digits = 3)
+```
+
+# 5. Cross-validation with SCRuB and MicrobIEM
+
+The primary cross-tool comparison uses pooled decontam `combined` at threshold
+0.5. MicrobIEM receives Prep controls as NEG1 and Air Swabs as NEG2. Ratio 1
+with no explicit minimum span is retained as the prespecified reference result,
+and a separate ratio-by-span sensitivity grid is reported below. SCRuB is run twice on
+the identical pooled count table and controls: once without position metadata
+and once with the 96-well locations reconstructed from `No` using the same
+column-wise mapping as script 05 (A1--H1, A2--H2, and so on). Thus the only
+difference between the two SCRuB runs is whether its well-to-well leakage
+component is enabled. The default Euclidean distance threshold of 1.5 is kept.
+
+```{r run-cross-tools}
+combined_flagged <- flags_05$feature_id[flags_05$combined]
+original_taxa_reads <- colSums(biological_counts)
+
+combined_removed_taxa <- setNames(numeric(ncol(biological_counts)), colnames(biological_counts))
+combined_removed_taxa[combined_flagged] <- original_taxa_reads[combined_flagged]
+combined_removed_samples <- rowSums(biological_counts[, combined_flagged, drop = FALSE])
+
+source(microbiem_source)
+microbiem_result <- MicrobIEM_decontamination(
+  feature_table = data.frame(t(count_matrix), check.names = FALSE),
+  SAMPLE = biological_ids,
+  NEG1 = prep_ids,
+  NEG2 = air_ids,
+  ratio_NEG1_threshold = 1,
+  ratio_NEG2_threshold = 1,
+  span_NEG1_threshold = NA_real_,
+  span_NEG2_threshold = NA_real_
+)
+microbiem_flagged <- rownames(microbiem_result)[microbiem_result$is_contaminant]
+microbiem_removed_taxa <- setNames(numeric(ncol(biological_counts)), colnames(biological_counts))
+microbiem_removed_taxa[microbiem_flagged] <- original_taxa_reads[microbiem_flagged]
+microbiem_removed_samples <- rowSums(biological_counts[, microbiem_flagged, drop = FALSE])
+
+scrub_meta <- data.frame(
+  is_control = rownames(count_matrix) %in% control_ids,
+  control_type = case_when(
+    rownames(count_matrix) %in% prep_ids ~ "Prep control",
+    rownames(count_matrix) %in% air_ids ~ "Air Swab",
+    TRUE ~ "Biological sample"
+  ),
+  row.names = rownames(count_matrix)
+)
+set.seed(42)
+scrub_result <- SCRuB::SCRuB(
+  count_matrix, scrub_meta,
+  control_order = c("Prep control", "Air Swab"),
+  verbose = FALSE
+)
+scrub_clean <- scrub_result$decontaminated_samples[
+  biological_ids, colnames(biological_counts), drop = FALSE
+]
+scrub_removed <- pmax(biological_counts - scrub_clean, 0)
+scrub_removed_taxa <- colSums(scrub_removed)
+scrub_removed_samples <- rowSums(scrub_removed)
+rm(scrub_removed); gc()
+
+well_lookup <- setNames(scope_info$well, scope_info$sample_id)
+scrub_meta_spatial <- scrub_meta
+scrub_meta_spatial$well <- unname(well_lookup[rownames(scrub_meta_spatial)])
+if (anyNA(scrub_meta_spatial$well) || anyDuplicated(scrub_meta_spatial$well)) {
+  stop("SCRuB spatial analysis requires complete, unique well locations.")
+}
+
+set.seed(42)
+scrub_spatial_result <- SCRuB::SCRuB(
+  count_matrix, scrub_meta_spatial,
+  control_order = c("Prep control", "Air Swab"),
+  dist_threshold = 1.5,
+  dist_metric = "euclidean",
+  verbose = FALSE
+)
+scrub_spatial_clean <- scrub_spatial_result$decontaminated_samples[
+  biological_ids, colnames(biological_counts), drop = FALSE
+]
+scrub_spatial_removed <- pmax(biological_counts - scrub_spatial_clean, 0)
+scrub_spatial_removed_taxa <- colSums(scrub_spatial_removed)
+scrub_spatial_removed_samples <- rowSums(scrub_spatial_removed)
+rm(scrub_spatial_removed); gc()
+```
+
+```{r harmonize-cross-tools}
+feature_agreement <- data.frame(
+  ASV = colnames(biological_counts),
+  original_biological_reads = as.numeric(original_taxa_reads),
+  decontam_combined_removed_reads = as.numeric(combined_removed_taxa[colnames(biological_counts)]),
+  SCRuB_nonspatial_removed_reads = as.numeric(scrub_removed_taxa[colnames(biological_counts)]),
+  SCRuB_spatial_removed_reads = as.numeric(scrub_spatial_removed_taxa[colnames(biological_counts)]),
+  MicrobIEM_removed_reads = as.numeric(microbiem_removed_taxa[colnames(biological_counts)]),
+  stringsAsFactors = FALSE
+) |>
+  mutate(
+    decontam_combined_removed_fraction = if_else(original_biological_reads > 0,
+      decontam_combined_removed_reads / original_biological_reads, 0),
+    SCRuB_nonspatial_removed_fraction = if_else(original_biological_reads > 0,
+      SCRuB_nonspatial_removed_reads / original_biological_reads, 0),
+    SCRuB_spatial_removed_fraction = if_else(original_biological_reads > 0,
+      SCRuB_spatial_removed_reads / original_biological_reads, 0),
+    MicrobIEM_removed_fraction = if_else(original_biological_reads > 0,
+      MicrobIEM_removed_reads / original_biological_reads, 0),
+    decontam_combined_call = ASV %in% combined_flagged,
+    MicrobIEM_call = ASV %in% microbiem_flagged,
+    SCRuB_nonspatial_any = SCRuB_nonspatial_removed_reads > 1e-8,
+    SCRuB_nonspatial_ge_50pct = SCRuB_nonspatial_removed_fraction >= 0.50,
+    SCRuB_spatial_any = SCRuB_spatial_removed_reads > 1e-8,
+    SCRuB_spatial_ge_10pct = SCRuB_spatial_removed_fraction >= 0.10,
+    SCRuB_spatial_ge_50pct = SCRuB_spatial_removed_fraction >= 0.50,
+    SCRuB_spatial_ge_90pct = SCRuB_spatial_removed_fraction >= 0.90
+  )
+
+taxonomy_df <- data.frame(tax_table(ps_scope), check.names = FALSE, stringsAsFactors = FALSE)
+taxonomy_df$ASV <- rownames(taxonomy_df)
+feature_agreement <- left_join(feature_agreement, taxonomy_df, by = "ASV")
+write_csv(feature_agreement, file.path(output_dir, "06_07_cross_method_ASV_agreement.csv"))
+
+method_summary <- data.frame(
+  method = c("decontam combined", "SCRuB non-spatial", "SCRuB spatial", "MicrobIEM"),
+  binary_rule = c("threshold 0.5", "any removed read", "any removed read",
+                  "NEG1 or NEG2 ratio > 1"),
+  n_flagged_or_affected_ASVs = c(sum(feature_agreement$decontam_combined_call),
+    sum(feature_agreement$SCRuB_nonspatial_any),
+    sum(feature_agreement$SCRuB_spatial_any), sum(feature_agreement$MicrobIEM_call)),
+  biological_reads_removed = c(sum(combined_removed_taxa), sum(scrub_removed_taxa),
+    sum(scrub_spatial_removed_taxa), sum(microbiem_removed_taxa)),
+  biological_reads_removed_pct = 100 * c(sum(combined_removed_taxa),
+    sum(scrub_removed_taxa), sum(scrub_spatial_removed_taxa),
+    sum(microbiem_removed_taxa)) / sum(biological_counts)
+)
+write_csv(method_summary, file.path(output_dir, "06_08_cross_method_summary.csv"))
+knitr::kable(method_summary, digits = 3, format.args = list(big.mark = ","))
+```
+
+```{r cross-method-summary-plot}
+p_method <- method_summary |>
+  mutate(method = factor(method, levels = method)) |>
+  ggplot(aes(method, biological_reads_removed_pct, fill = method)) +
+  geom_col(width = 0.7) +
+  geom_text(aes(label = sprintf("%.2f%%", biological_reads_removed_pct)),
+            vjust = -0.35, size = 4) +
+  scale_fill_manual(values = c("#7570B3", "#E7298A", "#E6AB02", "#66A61E")) +
+  labs(title = "Biological reads removed by each method", x = NULL,
+       y = "Biological reads removed (%)") +
+  theme(legend.position = "none") +
+  coord_cartesian(ylim = c(0, max(method_summary$biological_reads_removed_pct) * 1.15 + 0.01))
+print(p_method)
+ggsave(file.path(output_dir, "06_03_cross_method_read_removal.png"), p_method,
+       width = 8, height = 5, dpi = 300)
+```
+
+## MicrobIEM ratio and span threshold sensitivity
+
+MicrobIEM does not use a decontam-like probability threshold. Its ratio is the
+mean relative abundance in a negative-control class divided by the mean
+relative abundance in biological samples. Thus a ratio threshold of 1 flags an
+ASV when it is more abundant in at least one control class than in biological
+samples. The span threshold is the minimum fraction of controls in which that
+ASV must be detected. `NA` below means no explicit minimum span beyond being
+detected in at least one control, matching the reference call used above.
+
+The same ratio and span settings are applied to Prep controls (NEG1) and Air
+Swabs (NEG2). These settings are a sensitivity grid, not candidate values of a
+decontam threshold and not an optimization exercise.
+
+```{r microbiem-threshold-sensitivity}
+microbiem_ratio_thresholds <- c(0.25, 0.5, 0.75, 1, 1.5, 2, 3, 5, 10)
+microbiem_span_thresholds <- c(NA_real_, 0.25, 0.5, 0.75, 1)
+
+microbiem_grid <- expand.grid(
+  ratio_threshold = microbiem_ratio_thresholds,
+  span_threshold = microbiem_span_thresholds,
+  KEEP.OUT.ATTRS = FALSE,
+  stringsAsFactors = FALSE
+)
+
+microbiem_sensitivity_rows <- vector("list", nrow(microbiem_grid))
+microbiem_flag_rows <- vector("list", nrow(microbiem_grid))
+
+for (i in seq_len(nrow(microbiem_grid))) {
+  ratio_value <- microbiem_grid$ratio_threshold[i]
+  span_value <- microbiem_grid$span_threshold[i]
+  fit <- MicrobIEM_decontamination(
+    feature_table = data.frame(t(count_matrix), check.names = FALSE),
+    SAMPLE = biological_ids,
+    NEG1 = prep_ids,
+    NEG2 = air_ids,
+    ratio_NEG1_threshold = ratio_value,
+    ratio_NEG2_threshold = ratio_value,
+    span_NEG1_threshold = span_value,
+    span_NEG2_threshold = span_value
+  )
+  flagged <- rownames(fit)[fit$is_contaminant]
+  removed_reads <- sum(original_taxa_reads[flagged])
+  intersection_n <- length(intersect(flagged, combined_flagged))
+  union_n <- length(union(flagged, combined_flagged))
+
+  microbiem_sensitivity_rows[[i]] <- data.frame(
+    ratio_threshold = ratio_value,
+    span_threshold = span_value,
+    span_label = ifelse(is.na(span_value), "Any detected", as.character(span_value)),
+    n_flagged_ASVs = length(flagged),
+    biological_reads_removed = removed_reads,
+    biological_reads_removed_pct = 100 * removed_reads / sum(biological_counts),
+    overlap_with_decontam_combined = intersection_n,
+    jaccard_with_decontam_combined = ifelse(union_n == 0, NA_real_, intersection_n / union_n),
+    stringsAsFactors = FALSE
+  )
+  microbiem_flag_rows[[i]] <- data.frame(
+    ratio_threshold = ratio_value,
+    span_threshold = span_value,
+    span_label = ifelse(is.na(span_value), "Any detected", as.character(span_value)),
+    ASV = colnames(biological_counts),
+    contaminant = colnames(biological_counts) %in% flagged,
+    stringsAsFactors = FALSE
+  )
+}
+
+microbiem_sensitivity <- bind_rows(microbiem_sensitivity_rows) |>
+  mutate(
+    span_label = factor(
+      span_label,
+      levels = c("Any detected", "0.25", "0.5", "0.75", "1")
+    ),
+    reference_setting = ratio_threshold == 1 & span_label == "Any detected"
+  )
+microbiem_sensitivity_flags <- bind_rows(microbiem_flag_rows)
+
+write_csv(
+  microbiem_sensitivity,
+  file.path(output_dir, "06_14_MicrobIEM_threshold_sensitivity.csv")
+)
+write_csv(
+  microbiem_sensitivity_flags,
+  file.path(output_dir, "06_15_MicrobIEM_threshold_feature_flags.csv")
+)
+
+knitr::kable(
+  microbiem_sensitivity |>
+    select(ratio_threshold, span_label, n_flagged_ASVs,
+           biological_reads_removed_pct, jaccard_with_decontam_combined),
+  digits = 3
+)
+```
+
+```{r microbiem-threshold-plots, fig.width=13, fig.height=5.5}
+p_microbiem_ratio <- microbiem_sensitivity |>
+  filter(span_label == "Any detected") |>
+  ggplot(aes(ratio_threshold, n_flagged_ASVs)) +
+  geom_line(color = "#66A61E", linewidth = 0.9) +
+  geom_point(aes(shape = reference_setting), color = "#66A61E", size = 2.8) +
+  scale_x_log10(breaks = microbiem_ratio_thresholds) +
+  scale_shape_manual(values = c(`FALSE` = 16, `TRUE` = 8)) +
+  labs(
+    title = "MicrobIEM ratio-threshold sensitivity",
+    subtitle = "Star: prespecified ratio = 1; no explicit minimum span",
+    x = "Control / biological mean-abundance ratio threshold (log scale)",
+    y = "Flagged ASVs", shape = NULL
+  ) + theme(legend.position = "bottom")
+
+p_microbiem_grid <- ggplot(
+  microbiem_sensitivity,
+  aes(factor(ratio_threshold, levels = microbiem_ratio_thresholds),
+      span_label, fill = biological_reads_removed_pct)
+) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.1f%%", biological_reads_removed_pct)), size = 3) +
+  scale_fill_gradient(low = "white", high = "#238B45") +
+  labs(
+    title = "MicrobIEM ratio-by-span sensitivity",
+    x = "Ratio threshold", y = "Minimum control span",
+    fill = "Biological reads\nremoved (%)"
+  )
+
+print(p_microbiem_ratio)
+print(p_microbiem_grid)
+ggsave(file.path(output_dir, "06_07_MicrobIEM_ratio_sensitivity.png"),
+       p_microbiem_ratio, width = 9, height = 5.5, dpi = 300)
+ggsave(file.path(output_dir, "06_08_MicrobIEM_ratio_span_heatmap.png"),
+       p_microbiem_grid, width = 11, height = 5.5, dpi = 300)
+```
+
+## Non-spatial SCRuB removal-fraction sensitivity
+
+SCRuB has no decontam-like classification threshold when well positions are
+absent. It estimates a continuous number of removed reads for every
+sample-by-ASV entry. To make its binary agreement with the other tools
+auditable, the single non-spatial SCRuB fit is summarized over prespecified
+global ASV removal-fraction cutoffs. These are post-estimation reporting
+cutoffs; SCRuB is not refitted at each value.
+
+```{r scrub-nonspatial-threshold-sensitivity}
+scrub_nonspatial_thresholds <- thresholds
+scrub_nonspatial_rows <- vector("list", length(scrub_nonspatial_thresholds))
+scrub_nonspatial_flag_rows <- vector("list", length(scrub_nonspatial_thresholds))
+
+for (i in seq_along(scrub_nonspatial_thresholds)) {
+  cutoff <- scrub_nonspatial_thresholds[i]
+  scrub_call <- feature_agreement$SCRuB_nonspatial_removed_fraction >= cutoff
+  decontam_call <- feature_agreement$decontam_combined_call
+  microbiem_call <- feature_agreement$MicrobIEM_call
+
+  jaccard_binary <- function(x, y) {
+    denominator <- sum(x | y)
+    if (denominator == 0) return(NA_real_)
+    sum(x & y) / denominator
+  }
+
+  scrub_nonspatial_rows[[i]] <- data.frame(
+    removal_fraction_cutoff = cutoff,
+    n_affected_ASVs = sum(scrub_call),
+    SCRuB_removed_reads_in_affected_ASVs = sum(
+      feature_agreement$SCRuB_nonspatial_removed_reads[scrub_call]
+    ),
+    SCRuB_removed_reads_pct_of_all_biological_reads = 100 * sum(
+      feature_agreement$SCRuB_nonspatial_removed_reads[scrub_call]
+    ) / sum(biological_counts),
+    jaccard_with_decontam_combined = jaccard_binary(scrub_call, decontam_call),
+    jaccard_with_MicrobIEM_ratio1 = jaccard_binary(scrub_call, microbiem_call),
+    stringsAsFactors = FALSE
+  )
+  scrub_nonspatial_flag_rows[[i]] <- data.frame(
+    removal_fraction_cutoff = cutoff,
+    ASV = feature_agreement$ASV,
+    affected = scrub_call,
+    stringsAsFactors = FALSE
+  )
+}
+
+scrub_nonspatial_sensitivity <- bind_rows(scrub_nonspatial_rows)
+scrub_nonspatial_sensitivity_flags <- bind_rows(scrub_nonspatial_flag_rows)
+
+write_csv(
+  scrub_nonspatial_sensitivity,
+  file.path(output_dir, "06_16_SCRuB_nonspatial_threshold_sensitivity.csv")
+)
+write_csv(
+  scrub_nonspatial_sensitivity_flags,
+  file.path(output_dir, "06_17_SCRuB_nonspatial_threshold_feature_flags.csv")
+)
+knitr::kable(scrub_nonspatial_sensitivity, digits = 3)
+```
+
+```{r scrub-nonspatial-threshold-plot, fig.width=11, fig.height=5.5}
+p_scrub_nonspatial <- scrub_nonspatial_sensitivity |>
+  select(removal_fraction_cutoff, jaccard_with_decontam_combined,
+         jaccard_with_MicrobIEM_ratio1) |>
+  pivot_longer(starts_with("jaccard_"), names_to = "comparison", values_to = "jaccard") |>
+  mutate(comparison = recode(
+    comparison,
+    jaccard_with_decontam_combined = "decontam combined 0.5",
+    jaccard_with_MicrobIEM_ratio1 = "MicrobIEM ratio 1"
+  )) |>
+  ggplot(aes(removal_fraction_cutoff, jaccard, color = comparison)) +
+  geom_line(linewidth = 0.9) + geom_point(size = 2.2) +
+  scale_x_continuous(breaks = scrub_nonspatial_thresholds) +
+  scale_y_continuous(limits = c(0, 1)) +
+  scale_color_manual(values = c(
+    "decontam combined 0.5" = "#7570B3",
+    "MicrobIEM ratio 1" = "#66A61E"
+  )) +
+  labs(
+    title = "Non-spatial SCRuB binary agreement across reporting cutoffs",
+    subtitle = "Cutoff = fraction of an ASV's biological reads removed by SCRuB",
+    x = "SCRuB ASV removal-fraction cutoff", y = "Jaccard overlap",
+    color = NULL
+  ) + theme(legend.position = "bottom")
+
+p_scrub_nonspatial_count <- ggplot(
+  scrub_nonspatial_sensitivity,
+  aes(removal_fraction_cutoff, n_affected_ASVs)
+) +
+  geom_line(color = "#E7298A", linewidth = 0.9) +
+  geom_point(color = "#E7298A", size = 2.2) +
+  scale_x_continuous(breaks = scrub_nonspatial_thresholds) +
+  labs(
+    title = "Non-spatial SCRuB affected ASVs",
+    x = "SCRuB ASV removal-fraction cutoff", y = "Affected ASVs"
+  )
+
+print(p_scrub_nonspatial)
+print(p_scrub_nonspatial_count)
+ggsave(file.path(output_dir, "06_09_SCRuB_nonspatial_threshold_agreement.png"),
+       p_scrub_nonspatial, width = 10, height = 5.5, dpi = 300)
+ggsave(file.path(output_dir, "06_10_SCRuB_nonspatial_threshold_ASVs.png"),
+       p_scrub_nonspatial_count, width = 9, height = 5.5, dpi = 300)
+```
+
+## Common-scale comparison of all five methods
+
+The numerical thresholds are not interchangeable across tools. Accordingly,
+all five methods are placed on common outcome axes: the percentage of
+biological reads removed and the number of ASVs classified or affected. The
+decontam curves use pooled calls, MicrobIEM uses the ratio sweep with no
+explicit minimum span, and SCRuB uses the non-spatial removal-fraction sweep.
+For SCRuB, removed reads are its estimated removed counts within ASVs passing
+the reporting cutoff; for binary methods, all reads belonging to a flagged ASV
+are counted as removed.
+
+```{r common-scale-all-methods}
+decontam_common <- threshold_summary |>
+  filter(batch_mode == "pooled") |>
+  transmute(
+    method = method_label,
+    threshold_parameter = "decontam threshold",
+    threshold_value = threshold,
+    threshold_label = paste0("t=", format(threshold, trim = TRUE)),
+    n_affected_ASVs = contaminant_features,
+    biological_reads_removed_pct = 100 - biological_reads_retained_pct
+  )
+
+microbiem_common <- microbiem_sensitivity |>
+  filter(span_label == "Any detected") |>
+  transmute(
+    method = "MicrobIEM",
+    threshold_parameter = "ratio threshold",
+    threshold_value = ratio_threshold,
+    threshold_label = paste0("r=", format(ratio_threshold, trim = TRUE)),
+    n_affected_ASVs = n_flagged_ASVs,
+    biological_reads_removed_pct = biological_reads_removed_pct
+  )
+
+scrub_common <- scrub_nonspatial_sensitivity |>
+  transmute(
+    method = "SCRuB non-spatial",
+    threshold_parameter = "ASV removal-fraction cutoff",
+    threshold_value = removal_fraction_cutoff,
+    threshold_label = paste0("f=", format(removal_fraction_cutoff, trim = TRUE)),
+    n_affected_ASVs = n_affected_ASVs,
+    biological_reads_removed_pct = SCRuB_removed_reads_pct_of_all_biological_reads
+  )
+
+common_scale_sensitivity <- bind_rows(
+  decontam_common, microbiem_common, scrub_common
+) |>
+  mutate(method = factor(
+    method,
+    levels = c("Prevalence", "Frequency", "Combined", "MicrobIEM", "SCRuB non-spatial")
+  ))
+
+label_points <- common_scale_sensitivity |>
+  filter(
+    method %in% c("Prevalence", "Frequency", "Combined") &
+      threshold_value %in% c(0.1, 0.5, 0.9) |
+    method == "MicrobIEM" & threshold_value %in% c(0.5, 1, 3, 10) |
+    method == "SCRuB non-spatial" & threshold_value %in% c(0.1, 0.5, 0.9)
+  )
+
+write_csv(
+  common_scale_sensitivity,
+  file.path(output_dir, "06_18_cross_method_sensitivity_common_scale.csv")
+)
+
+p_common_scale <- ggplot(
+  common_scale_sensitivity,
+  aes(biological_reads_removed_pct, n_affected_ASVs, color = method, group = method)
+) +
+  geom_line(linewidth = 0.95) +
+  geom_point(size = 2.2) +
+  geom_text(
+    data = label_points,
+    aes(label = threshold_label),
+    size = 3, vjust = -0.7, check_overlap = TRUE, show.legend = FALSE
+  ) +
+  scale_x_continuous(
+    trans = scales::pseudo_log_trans(base = 10),
+    breaks = c(0, 1, 2, 5, 10, 20, 40, 60),
+    labels = function(x) paste0(x, "%")
+  ) +
+  scale_color_manual(values = c(
+    Prevalence = "#1B9E77", Frequency = "#D95F02", Combined = "#7570B3",
+    MicrobIEM = "#66A61E", `SCRuB non-spatial` = "#E7298A"
+  )) +
+  labs(
+    title = "Five-method sensitivity comparison on common outcome axes",
+    subtitle = "Labels: t = decontam threshold, r = MicrobIEM ratio, f = SCRuB removal-fraction cutoff",
+    x = "Biological reads removed (pseudo-log scale)",
+    y = "Flagged or affected ASVs", color = NULL
+  ) +
+  theme(legend.position = "bottom")
+
+print(p_common_scale)
+ggsave(
+  file.path(output_dir, "06_11_cross_method_sensitivity_common_scale.png"),
+  p_common_scale, width = 12, height = 7, dpi = 300
+)
+knitr::kable(common_scale_sensitivity, digits = 3)
+```
+
+## Continuous and binary agreement
+
+```{r cross-method-agreement}
+weighted_jaccard <- function(x, y) {
+  denominator <- sum(pmax(x, y))
+  if (denominator == 0) return(NA_real_)
+  sum(pmin(x, y)) / denominator
+}
+
+fraction_matrix <- feature_agreement |>
+  select(decontam_combined_removed_fraction, SCRuB_nonspatial_removed_fraction,
+         SCRuB_spatial_removed_fraction,
+         MicrobIEM_removed_fraction)
+colnames(fraction_matrix) <- c(
+  "decontam combined", "SCRuB non-spatial", "SCRuB spatial", "MicrobIEM"
+)
+tool_pairs <- combn(colnames(fraction_matrix), 2, simplify = FALSE)
+
+continuous_agreement <- bind_rows(lapply(tool_pairs, function(pair) {
+  x <- fraction_matrix[[pair[1]]]; y <- fraction_matrix[[pair[2]]]
+  data.frame(
+    method_1 = pair[1], method_2 = pair[2],
+    Spearman_rho = suppressWarnings(cor(x, y, method = "spearman")),
+    weighted_Jaccard = weighted_jaccard(x, y)
+  )
+}))
+
+binary_cross_agreement <- bind_rows(
+  cbind(comparison = "decontam combined vs MicrobIEM",
+        binary_metrics(feature_agreement$decontam_combined_call,
+                       feature_agreement$MicrobIEM_call)),
+  cbind(comparison = "decontam combined vs SCRuB spatial >=10%",
+        binary_metrics(feature_agreement$decontam_combined_call,
+                       feature_agreement$SCRuB_spatial_ge_10pct)),
+  cbind(comparison = "decontam combined vs SCRuB spatial >=50%",
+        binary_metrics(feature_agreement$decontam_combined_call,
+                       feature_agreement$SCRuB_spatial_ge_50pct)),
+  cbind(comparison = "decontam combined vs SCRuB spatial >=90%",
+        binary_metrics(feature_agreement$decontam_combined_call,
+                       feature_agreement$SCRuB_spatial_ge_90pct)),
+  cbind(comparison = "MicrobIEM vs SCRuB spatial >=50%",
+        binary_metrics(feature_agreement$MicrobIEM_call,
+                       feature_agreement$SCRuB_spatial_ge_50pct)),
+  cbind(comparison = "SCRuB non-spatial vs spatial >=50%",
+        binary_metrics(feature_agreement$SCRuB_nonspatial_ge_50pct,
+                       feature_agreement$SCRuB_spatial_ge_50pct))
+)
+write_csv(continuous_agreement, file.path(output_dir, "06_09_continuous_agreement.csv"))
+write_csv(binary_cross_agreement, file.path(output_dir, "06_10_binary_agreement.csv"))
+knitr::kable(continuous_agreement, digits = 3)
+knitr::kable(binary_cross_agreement, digits = 3)
+```
+
+## Direct five-method ASV intersections
+
+Low Jaccard values do not mean that the intersections are empty. Jaccard uses
+the union as its denominator, and SCRuB affects a much broader ASV set than the
+binary callers. The primary display below uses pooled decontam threshold 0.5,
+MicrobIEM ratio 1 with no explicit minimum span, and the non-spatial SCRuB 10%
+ASV removal-fraction reporting cutoff. The latter is a descriptive cutoff, not
+an internal SCRuB fitting threshold.
+
+```{r five-method-overlap}
+agreement_index <- match(flags_05$feature_id, feature_agreement$ASV)
+five_method_calls <- data.frame(
+  ASV = flags_05$feature_id,
+  Prevalence = flags_05$prevalence,
+  Frequency = flags_05$frequency,
+  Combined = flags_05$combined,
+  MicrobIEM = feature_agreement$MicrobIEM_call[agreement_index],
+  `SCRuB >=10%` = feature_agreement$SCRuB_nonspatial_removed_fraction[agreement_index] >= 0.10,
+  check.names = FALSE
+)
+
+call_names <- colnames(five_method_calls)[-1]
+pair_grid <- expand.grid(
+  method_1 = call_names, method_2 = call_names,
+  stringsAsFactors = FALSE
+)
+five_method_pairwise <- bind_rows(lapply(seq_len(nrow(pair_grid)), function(i) {
+  method_1 <- pair_grid$method_1[i]
+  method_2 <- pair_grid$method_2[i]
+  x <- five_method_calls[[method_1]]
+  y <- five_method_calls[[method_2]]
+  intersection_n <- sum(x & y)
+  union_n <- sum(x | y)
+  data.frame(
+    method_1 = method_1,
+    method_2 = method_2,
+    n_method_1 = sum(x),
+    n_method_2 = sum(y),
+    overlap_ASVs = intersection_n,
+    union_ASVs = union_n,
+    jaccard = ifelse(union_n == 0, NA_real_, intersection_n / union_n)
+  )
+}))
+
+five_way_shared_10 <- sum(Reduce(`&`, five_method_calls[-1]))
+five_way_shared_50 <- sum(
+  flags_05$prevalence & flags_05$frequency & flags_05$combined &
+    feature_agreement$MicrobIEM_call[agreement_index] &
+    feature_agreement$SCRuB_nonspatial_removed_fraction[agreement_index] >= 0.50
+)
+
+membership_code <- apply(five_method_calls[-1], 1, function(x) {
+  paste(c("P", "F", "C", "M", "S")[x], collapse = "+")
+})
+membership_code[membership_code == ""] <- "None"
+five_method_patterns <- data.frame(
+  membership = membership_code,
+  stringsAsFactors = FALSE
+) |>
+  count(membership, name = "n_ASVs", sort = TRUE)
+
+write_csv(
+  five_method_pairwise,
+  file.path(output_dir, "06_19_five_method_pairwise_overlap.csv")
+)
+write_csv(
+  five_method_patterns,
+  file.path(output_dir, "06_20_five_method_exact_membership_patterns.csv")
+)
+
+five_way_summary <- data.frame(
+  comparison = c("All five methods, SCRuB >=10%", "All five methods, SCRuB >=50%"),
+  shared_ASVs = c(five_way_shared_10, five_way_shared_50)
+)
+knitr::kable(five_way_summary)
+knitr::kable(
+  five_method_pairwise |>
+    filter(match(method_1, call_names) < match(method_2, call_names)),
+  digits = 3
+)
+```
+
+```{r five-method-overlap-plots, fig.width=11, fig.height=7}
+method_levels <- c("Prevalence", "Frequency", "Combined", "MicrobIEM", "SCRuB >=10%")
+p_overlap_matrix <- five_method_pairwise |>
+  mutate(
+    method_1 = factor(method_1, levels = method_levels),
+    method_2 = factor(method_2, levels = rev(method_levels)),
+    cell_label = paste0(overlap_ASVs, "\nJ=", sprintf("%.2f", jaccard))
+  ) |>
+  ggplot(aes(method_1, method_2, fill = jaccard)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = cell_label), size = 3.2) +
+  scale_fill_gradient(low = "white", high = "#2166AC", limits = c(0, 1)) +
+  labs(
+    title = "Pairwise ASV overlap across five methods",
+    subtitle = "Cell text: intersection count and Jaccard; SCRuB uses non-spatial >=10% reporting cutoff",
+    x = NULL, y = NULL, fill = "Jaccard"
+  ) +
+  theme(axis.text.x = element_text(angle = 35, hjust = 1))
+
+p_membership <- five_method_patterns |>
+  slice_head(n = 15) |>
+  mutate(membership = factor(membership, levels = rev(membership))) |>
+  ggplot(aes(n_ASVs, membership)) +
+  geom_col(fill = "#4C78A8") +
+  geom_text(aes(label = n_ASVs), hjust = -0.15, size = 3.3) +
+  labs(
+    title = "Largest exact ASV membership patterns",
+    subtitle = paste0(
+      "P=prevalence, F=frequency, C=combined, M=MicrobIEM, S=SCRuB >=10%; ",
+      "all-five intersection = ", five_way_shared_10
+    ),
+    x = "ASVs", y = NULL
+  ) +
+  coord_cartesian(xlim = c(0, max(five_method_patterns$n_ASVs) * 1.12))
+
+print(p_overlap_matrix)
+print(p_membership)
+ggsave(file.path(output_dir, "06_12_five_method_overlap_matrix.png"),
+       p_overlap_matrix, width = 10, height = 8, dpi = 300)
+ggsave(file.path(output_dir, "06_13_five_method_membership_patterns.png"),
+       p_membership, width = 10, height = 7, dpi = 300)
+```
+
+```{r pairwise-scatter, fig.width=13, fig.height=4.5}
+scatter_data <- bind_rows(lapply(tool_pairs, function(pair) {
+  data.frame(method_1 = pair[1], method_2 = pair[2],
+             x = fraction_matrix[[pair[1]]], y = fraction_matrix[[pair[2]]])
+})) |>
+  mutate(panel = paste(method_1, "vs", method_2))
+
+p_scatter <- ggplot(scatter_data, aes(x, y)) +
+  geom_point(alpha = 0.35, size = 1) +
+  geom_abline(slope = 1, intercept = 0, linetype = 2, color = "grey45") +
+  facet_wrap(~panel, nrow = 1) +
+  scale_x_continuous(limits = c(0, 1)) + scale_y_continuous(limits = c(0, 1)) +
+  labs(title = "ASV-level read-removal agreement", x = "Method 1 removal fraction",
+       y = "Method 2 removal fraction")
+print(p_scatter)
+ggsave(file.path(output_dir, "06_04_pairwise_removal_scatter.png"), p_scatter,
+       width = 13, height = 4.5, dpi = 300)
+```
+
+## Shared and method-specific taxa
+
+```{r discordant-taxa}
+taxon_label <- function(df) {
+  rank_candidates <- c("Species", "Genus", "Family", "Order", "Class", "Phylum")
+  available <- intersect(rank_candidates, names(df))
+  out <- rep(NA_character_, nrow(df))
+  for (rank_name in available) {
+    value <- as.character(df[[rank_name]])
+    use <- is.na(out) & !is.na(value) & nzchar(value)
+    out[use] <- paste0(rank_name, ": ", value[use])
+  }
+  out[is.na(out)] <- df$ASV[is.na(out)]
+  out
+}
+
+discordant_taxa <- feature_agreement |>
+  mutate(
+    taxon = taxon_label(feature_agreement),
+    call_pattern = paste0(
+      "D", as.integer(decontam_combined_call),
+      "_SN", as.integer(SCRuB_nonspatial_ge_50pct),
+      "_SS", as.integer(SCRuB_spatial_ge_50pct),
+      "_M", as.integer(MicrobIEM_call)
+    ),
+    mean_removed_fraction = rowMeans(cbind(
+      decontam_combined_removed_fraction, SCRuB_nonspatial_removed_fraction,
+      SCRuB_spatial_removed_fraction,
+      MicrobIEM_removed_fraction
+    ))
+  ) |>
+  filter(decontam_combined_call | SCRuB_nonspatial_ge_50pct |
+           SCRuB_spatial_ge_50pct | MicrobIEM_call) |>
+  arrange(desc(original_biological_reads))
+write_csv(discordant_taxa, file.path(output_dir, "06_11_flagged_taxa_and_call_patterns.csv"))
+
+top_discordant <- discordant_taxa |>
+  slice_head(n = 40) |>
+  select(ASV, taxon, original_biological_reads,
+         decontam_combined_removed_fraction,
+         SCRuB_nonspatial_removed_fraction, SCRuB_spatial_removed_fraction,
+         MicrobIEM_removed_fraction) |>
+  pivot_longer(ends_with("removed_fraction"), names_to = "method", values_to = "removed_fraction") |>
+  mutate(
+    method = recode(method,
+      decontam_combined_removed_fraction = "decontam combined",
+      SCRuB_nonspatial_removed_fraction = "SCRuB non-spatial",
+      SCRuB_spatial_removed_fraction = "SCRuB spatial",
+      MicrobIEM_removed_fraction = "MicrobIEM"),
+    taxon = factor(taxon, levels = rev(unique(taxon)))
+  )
+
+p_taxa <- ggplot(top_discordant, aes(method, taxon, fill = removed_fraction)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "white", high = "#B2182B", limits = c(0, 1)) +
+  labs(title = "Top flagged/affected ASVs: method-specific removal",
+       subtitle = "Top 40 by biological read count; both SCRuB outputs shown continuously",
+       x = NULL, y = NULL, fill = "Removal\nfraction") +
+  theme(axis.text.y = element_text(size = 7))
+print(p_taxa)
+ggsave(file.path(output_dir, "06_05_top_taxa_method_heatmap.png"), p_taxa,
+       width = 10, height = 11, dpi = 300)
+```
+
+# 6. Sample-level impact
+
+```{r sample-impact}
+sample_impact <- data.frame(
+  sample_id = biological_ids,
+  original_reads = rowSums(biological_counts),
+  decontam_combined_removed_reads = as.numeric(combined_removed_samples[biological_ids]),
+  SCRuB_nonspatial_removed_reads = as.numeric(scrub_removed_samples[biological_ids]),
+  SCRuB_spatial_removed_reads = as.numeric(scrub_spatial_removed_samples[biological_ids]),
+  MicrobIEM_removed_reads = as.numeric(microbiem_removed_samples[biological_ids])
+) |>
+  pivot_longer(ends_with("removed_reads"), names_to = "method", values_to = "removed_reads") |>
+  mutate(
+    removed_pct = 100 * removed_reads / original_reads,
+    method = recode(method,
+      decontam_combined_removed_reads = "decontam combined",
+      SCRuB_nonspatial_removed_reads = "SCRuB non-spatial",
+      SCRuB_spatial_removed_reads = "SCRuB spatial",
+      MicrobIEM_removed_reads = "MicrobIEM")
+  )
+write_csv(sample_impact, file.path(output_dir, "06_12_sample_level_removal.csv"))
+
+p_sample <- ggplot(sample_impact, aes(method, removed_pct, fill = method)) +
+  geom_boxplot(outlier.shape = NA, width = 0.65) +
+  geom_jitter(width = 0.12, alpha = 0.45, size = 1) +
+  scale_fill_manual(values = c("#7570B3", "#E7298A", "#E6AB02", "#66A61E")) +
+  labs(title = "Sample-level biological read removal", x = NULL,
+       y = "Reads removed per sample (%)") + theme(legend.position = "none")
+print(p_sample)
+ggsave(file.path(output_dir, "06_06_sample_level_removal.png"), p_sample,
+       width = 8, height = 5, dpi = 300)
+```
+
+# 7. Verification and interpretation boundary
+
+```{r verification}
+monotonic_check <- threshold_summary |>
+  arrange(method, batch_mode, threshold) |>
+  group_by(method, batch_mode) |>
+  summarise(non_decreasing = all(diff(contaminant_features) >= 0), .groups = "drop")
+
+verification <- data.frame(
+  check = c(
+    "All six decontam runs completed",
+    "All threshold grids are complete",
+    "Contaminant counts are non-decreasing",
+    "Cross-tool feature IDs are aligned",
+    "Both SCRuB outputs contain every biological sample",
+    "Spatial and non-spatial SCRuB used identical sample IDs",
+    "Spatial SCRuB received complete unique wells",
+    "MicrobIEM sensitivity grid is complete",
+    "MicrobIEM calls decrease monotonically with stricter thresholds",
+    "Non-spatial SCRuB reporting grid is complete",
+    "Non-spatial SCRuB calls decrease with stricter cutoffs",
+    "Common-scale five-method table is complete",
+    "Five-way overlap is non-zero at SCRuB 10% and 50% cutoffs",
+    "No positive control entered contaminant learning"
+  ),
+  passed = c(
+    length(decontam_runs) == 6,
+    nrow(threshold_summary) == 6 * length(thresholds),
+    all(monotonic_check$non_decreasing),
+    nrow(feature_agreement) == ncol(biological_counts),
+    setequal(rownames(scrub_clean), biological_ids) &
+      setequal(rownames(scrub_spatial_clean), biological_ids),
+    setequal(rownames(scrub_clean), rownames(scrub_spatial_clean)),
+    !anyNA(scrub_meta_spatial$well) & !anyDuplicated(scrub_meta_spatial$well),
+    nrow(microbiem_sensitivity) ==
+      length(microbiem_ratio_thresholds) * length(microbiem_span_thresholds),
+    {
+      ratio_check <- microbiem_sensitivity |>
+        arrange(span_label, ratio_threshold) |>
+        group_by(span_label) |>
+        summarise(ok = all(diff(n_flagged_ASVs) <= 0), .groups = "drop")
+      span_check <- microbiem_sensitivity |>
+        mutate(span_order = match(as.character(span_label),
+          c("Any detected", "0.25", "0.5", "0.75", "1"))) |>
+        arrange(ratio_threshold, span_order) |>
+        group_by(ratio_threshold) |>
+        summarise(ok = all(diff(n_flagged_ASVs) <= 0), .groups = "drop")
+      all(ratio_check$ok) & all(span_check$ok)
+    },
+    nrow(scrub_nonspatial_sensitivity) == length(scrub_nonspatial_thresholds),
+    all(diff(scrub_nonspatial_sensitivity$n_affected_ASVs) <= 0),
+    nrow(common_scale_sensitivity) ==
+      3 * length(thresholds) + length(microbiem_ratio_thresholds) +
+      length(scrub_nonspatial_thresholds),
+    five_way_shared_10 > 0 & five_way_shared_50 > 0,
+    !any(scope_info$is_positive_control)
+  )
+)
+write_csv(verification, file.path(output_dir, "06_13_verification.csv"))
+knitr::kable(verification)
+if (!all(verification$passed)) stop("One or more verification checks failed.")
+```
+
+The output quantifies agreement; it does not establish which method is true.
+Differences are expected because decontam combined integrates frequency and
+prevalence evidence into a global binary call, MicrobIEM compares mean relative
+abundance between samples and two control classes, and SCRuB estimates
+sample-specific contamination fractions. The fixed 0.5 and ratio-1 settings
+must therefore be described as prespecified comparison settings, not as an
+empirically optimized winner.
+
+```{r session-info}
+sessionInfo()
+```

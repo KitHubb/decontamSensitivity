@@ -1,0 +1,7 @@
+check,passed
+Official dataset contains 10 samples and 1414 ASVs,TRUE
+Gold standard contains 9 expected and 1405 contaminant ASVs,TRUE
+Five methods and three intensity levels completed,TRUE
+Every method-intensity combination produced all nine dilution results,TRUE
+Confusion matrices recover every original sample read,TRUE
+All reported metrics are within their valid ranges,TRUE

@@ -1,0 +1,5 @@
+method,binary_rule,n_flagged_or_affected_ASVs,biological_reads_removed,biological_reads_removed_pct
+decontam combined,threshold 0.5,373,148717,7.178698260269747
+SCRuB non-spatial,any removed read,1995,225412,10.88083226694947
+SCRuB spatial,any removed read,2217,120134,5.798972120196385
+MicrobIEM,NEG1 or NEG2 ratio > 1,911,216479,10.449628628098568

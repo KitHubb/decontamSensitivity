@@ -1,0 +1,15 @@
+check,passed
+All six decontam runs completed,TRUE
+All threshold grids are complete,TRUE
+Contaminant counts are non-decreasing,TRUE
+Cross-tool feature IDs are aligned,TRUE
+Both SCRuB outputs contain every biological sample,TRUE
+Spatial and non-spatial SCRuB used identical sample IDs,TRUE
+Spatial SCRuB received complete unique wells,TRUE
+MicrobIEM sensitivity grid is complete,TRUE
+MicrobIEM calls decrease monotonically with stricter thresholds,TRUE
+Non-spatial SCRuB reporting grid is complete,TRUE
+Non-spatial SCRuB calls decrease with stricter cutoffs,TRUE
+Common-scale five-method table is complete,TRUE
+Five-way overlap is non-zero at SCRuB 10% and 50% cutoffs,TRUE
+No positive control entered contaminant learning,TRUE

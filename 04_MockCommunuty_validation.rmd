@@ -35,11 +35,7 @@ dir.create(results_dir, showWarnings = FALSE)
 
 thresholds <- c(0.01, 0.05, seq(0.1, 0.9, by = 0.1))
 methods <- c("prevalence", "frequency")
-control_scenarios <- c(
-  "prep_control_only",
-  "air_swab_only",
-  "prep_and_air_swab"
-)
+control_scenarios <- "prep_control_only"
 
 scenario_label <- c(
   prep_control_only = "Prep control only",
@@ -200,42 +196,55 @@ raw_cell_profile <- dplyr::bind_rows(raw_cell_list)
 dna_mock_profile <- make_genus_profile(dna_mock_id) |>
   dplyr::select(Genus, dna_mock_abundance = relative_abundance)
 
-raw_cell_mean <- raw_cell_profile |>
-  dplyr::group_by(Genus) |>
-  dplyr::summarise(
-    relative_abundance = mean(relative_abundance),
-    .groups = "drop"
-  )
+# Cell mix 3개를 평균 내지 않고 각각의 raw profile로 유지한다.
+raw_mock_sample_label <- metadata |>
+  dplyr::filter(SampleID %in% c(cell_mock_ids, dna_mock_id)) |>
+  dplyr::select(SampleID, Subject)
 
-reference_composition <- dplyr::full_join(
+reference_composition <- dplyr::bind_rows(
   mock_truth |>
-    dplyr::select(Genus, theoretical_abundance = expected_abundance),
-  dna_mock_profile,
-  by = "Genus"
+    dplyr::transmute(
+      reference = "Theoretical",
+      Genus,
+      relative_abundance = expected_abundance
+    ),
+  dna_mock_profile |>
+    dplyr::transmute(
+      reference = "DNA-Mock",
+      Genus,
+      relative_abundance = dna_mock_abundance
+    ),
+  raw_cell_profile |>
+    dplyr::left_join(raw_mock_sample_label, by = "SampleID") |>
+    dplyr::transmute(
+      reference = Subject,
+      Genus,
+      relative_abundance
+    )
 ) |>
-  dplyr::full_join(
-    raw_cell_mean |>
-      dplyr::rename(raw_cell_abundance = relative_abundance),
-    by = "Genus"
-  ) |>
   dplyr::mutate(
-    dplyr::across(
-      c(theoretical_abundance, dna_mock_abundance, raw_cell_abundance),
-      ~ tidyr::replace_na(.x, 0)
+    reference = factor(
+      reference,
+      levels = c(
+        "Theoretical",
+        metadata$Subject[match(cell_mock_ids, metadata$SampleID)],
+        metadata$Subject[match(dna_mock_id, metadata$SampleID)]
+      )
     )
   ) |>
-  dplyr::arrange(dplyr::desc(dna_mock_abundance))
+  dplyr::arrange(reference, dplyr::desc(relative_abundance))
 
 readr::write_csv(
   reference_composition,
-  file.path(results_dir, "04_reference_composition.csv")
+  file.path(results_dir, "04_reference_composition_by_mock_sample.csv")
 )
 
 reference_composition |>
-  dplyr::filter(
-    theoretical_abundance > 0 |
-      dna_mock_abundance >= 0.001 |
-      raw_cell_abundance >= 0.001
+  dplyr::filter(relative_abundance >= 0.001) |>
+  tidyr::pivot_wider(
+    names_from = reference,
+    values_from = relative_abundance,
+    values_fill = 0
   ) |>
   knitr::kable(digits = 4)
 ```
@@ -247,27 +256,10 @@ reference_plot_data <- reference_composition |>
   dplyr::mutate(
     Genus_plot = dplyr::if_else(Genus %in% target_genera, Genus, "Other")
   ) |>
-  dplyr::select(
-    Genus_plot,
-    Theoretical = theoretical_abundance,
-    `DNA mock` = dna_mock_abundance,
-    `Raw Cell mock` = raw_cell_abundance
-  ) |>
-  tidyr::pivot_longer(
-    cols = -Genus_plot,
-    names_to = "reference",
-    values_to = "relative_abundance"
-  ) |>
   dplyr::group_by(reference, Genus_plot) |>
   dplyr::summarise(
     relative_abundance = sum(relative_abundance),
     .groups = "drop"
-  ) |>
-  dplyr::mutate(
-    reference = factor(
-      reference,
-      levels = c("Theoretical", "DNA mock", "Raw Cell mock")
-    )
   )
 
 mock_taxa_color <- c(
@@ -305,7 +297,1371 @@ ggsave(
 reference_composition_plot
 ```
 
-# 2) Cycle 3 decontam analysis
+# 2) Distribution of DNA mix off target ASVs across the sequencing run
+
+Because the DNA mix entered at the library preparation stage, non target ASVs detected in this sample are examined across all other samples. Widespread detection and a positive relationship between DNA mix counts and pooled counts from other libraries would be consistent with sample to sample cross talk, although this pattern cannot distinguish library preparation carryover from sequencing index misassignment.
+
+```{r dna-mix-off-target-summary}
+sample_role_table <- metadata |>
+  dplyr::mutate(
+    sample_role = dplyr::case_when(
+      is_true ~ "True",
+      is_prep_control ~ "Prep control",
+      is_air_swab ~ "Air Swab",
+      is_cell_mock ~ "Cell mix",
+      is_dna_mock ~ "DNA mix",
+      TRUE ~ "Other"
+    )
+  ) |>
+  dplyr::select(SampleID, sample_role)
+
+dna_off_target_asv <- taxonomy |>
+  dplyr::filter(!Genus %in% target_genera) |>
+  dplyr::filter(count_table[dna_mock_id, feature_id] > 0) |>
+  dplyr::pull(feature_id)
+
+other_sample_ids <- setdiff(rownames(count_table), dna_mock_id)
+other_count <- count_table[
+  other_sample_ids,
+  dna_off_target_asv,
+  drop = FALSE
+]
+other_relative_abundance <- sweep(
+  other_count,
+  1,
+  rowSums(count_table[other_sample_ids, , drop = FALSE]),
+  "/"
+)
+
+top_source_index <- apply(other_count, 2, which.max)
+top_source_id <- rownames(other_count)[top_source_index]
+
+dna_off_target_summary <- tibble::tibble(
+  feature_id = dna_off_target_asv,
+  dna_mix_reads = as.numeric(
+    count_table[dna_mock_id, dna_off_target_asv]
+  ),
+  dna_mix_relative_abundance = dna_mix_reads / sum(
+    count_table[dna_mock_id, ]
+  ),
+  pooled_other_reads = colSums(other_count),
+  other_sample_prevalence = colMeans(other_count > 0),
+  top_source_sample = top_source_id,
+  top_source_reads = apply(other_count, 2, max)
+) |>
+  dplyr::left_join(
+    sample_role_table |>
+      dplyr::rename(
+        top_source_sample = SampleID,
+        top_source_role = sample_role
+      ),
+    by = "top_source_sample"
+  ) |>
+  dplyr::left_join(taxonomy, by = "feature_id") |>
+  dplyr::mutate(
+    dna_share_of_all_reads = dna_mix_reads /
+      (dna_mix_reads + pooled_other_reads),
+    detected_elsewhere = pooled_other_reads > 0,
+    taxon_label = dplyr::case_when(
+      !is.na(Species) & Species != "" ~ Species,
+      !is.na(Genus) & Genus != "Unclassified" ~ paste0(Genus, " sp."),
+      !is.na(Family) & Family != "" ~ paste0(Family, " sp."),
+      TRUE ~ "Unclassified"
+    ),
+    ASV_label = paste0(taxon_label, " | ", substr(feature_id, 1, 8))
+  ) |>
+  dplyr::arrange(dplyr::desc(dna_mix_reads))
+
+role_levels <- c("True", "Prep control", "Air Swab", "Cell mix", "Other")
+role_summary_list <- vector("list", length(role_levels))
+
+for (i in seq_along(role_levels)) {
+  role_name <- role_levels[i]
+  role_sample_ids <- sample_role_table |>
+    dplyr::filter(sample_role == role_name) |>
+    dplyr::pull(SampleID)
+
+  role_sample_ids <- intersect(role_sample_ids, other_sample_ids)
+
+  if (length(role_sample_ids) > 0) {
+    role_count <- count_table[
+      role_sample_ids,
+      dna_off_target_asv,
+      drop = FALSE
+    ]
+
+    role_relative_abundance <- sweep(
+      role_count,
+      1,
+      rowSums(count_table[role_sample_ids, , drop = FALSE]),
+      "/"
+    )
+
+    role_summary_list[[i]] <- tibble::tibble(
+      feature_id = dna_off_target_asv,
+      sample_role = role_name,
+      n_samples = length(role_sample_ids),
+      detected_samples = colSums(role_count > 0),
+      prevalence = detected_samples / n_samples,
+      total_reads = colSums(role_count),
+      mean_relative_abundance = colMeans(role_relative_abundance)
+    )
+  }
+}
+
+dna_off_target_role_summary <- dplyr::bind_rows(role_summary_list) |>
+  dplyr::left_join(
+    dna_off_target_summary |>
+      dplyr::select(feature_id, taxon_label, ASV_label, dna_mix_reads),
+    by = "feature_id"
+  ) |>
+  dplyr::mutate(
+    sample_role = factor(sample_role, levels = role_levels)
+  )
+
+true_sample_ids_for_dna <- sample_role_table |>
+  dplyr::filter(sample_role == "True") |>
+  dplyr::pull(SampleID)
+
+dna_off_target_in_true <- colSums(
+  count_table[
+    true_sample_ids_for_dna,
+    dna_off_target_asv,
+    drop = FALSE
+  ]
+) > 0
+
+dna_off_target_run_summary <- tibble::tibble(
+  metric = c(
+    "DNA mix total reads",
+    "DNA mix off target reads",
+    "DNA mix off target read percentage",
+    "DNA mix off target ASVs",
+    "Off target ASVs detected in other samples",
+    "Off target reads represented by ASVs detected elsewhere (%)",
+    "Off target ASVs detected in True samples",
+    "Off target reads represented by ASVs detected in True samples (%)",
+    "Spearman rho: DNA mix reads versus pooled other sample reads"
+  ),
+  value = c(
+    sum(count_table[dna_mock_id, ]),
+    sum(count_table[dna_mock_id, dna_off_target_asv]),
+    100 * sum(count_table[dna_mock_id, dna_off_target_asv]) /
+      sum(count_table[dna_mock_id, ]),
+    length(dna_off_target_asv),
+    sum(dna_off_target_summary$detected_elsewhere),
+    100 * sum(
+      dna_off_target_summary$dna_mix_reads[
+        dna_off_target_summary$detected_elsewhere
+      ]
+    ) / sum(dna_off_target_summary$dna_mix_reads),
+    sum(dna_off_target_in_true),
+    100 * sum(
+      dna_off_target_summary$dna_mix_reads[dna_off_target_in_true]
+    ) / sum(dna_off_target_summary$dna_mix_reads),
+    stats::cor(
+      dna_off_target_summary$dna_mix_reads,
+      dna_off_target_summary$pooled_other_reads,
+      method = "spearman"
+    )
+  )
+)
+
+readr::write_csv(
+  dna_off_target_summary,
+  file.path(results_dir, "04_DNA_mix_off_target_ASV_run_distribution.csv")
+)
+readr::write_csv(
+  dna_off_target_role_summary,
+  file.path(results_dir, "04_DNA_mix_off_target_ASV_by_sample_role.csv")
+)
+
+dna_off_target_run_summary |>
+  knitr::kable(digits = 3)
+
+dna_off_target_summary |>
+  dplyr::select(
+    feature_id,
+    taxon_label,
+    dna_mix_reads,
+    dna_mix_relative_abundance,
+    pooled_other_reads,
+    other_sample_prevalence,
+    top_source_sample,
+    top_source_role,
+    top_source_reads
+  ) |>
+  dplyr::slice_head(n = 30) |>
+  knitr::kable(digits = 4)
+```
+
+```{r dna-mix-cross-talk-scatter, fig.width=11, fig.height=8}
+dna_cross_talk_plot <- ggplot(
+  dna_off_target_summary,
+  aes(
+    x = pooled_other_reads + 1,
+    y = dna_mix_reads + 1,
+    color = top_source_role,
+    size = other_sample_prevalence
+  )
+) +
+  geom_point(alpha = 0.8) +
+  ggrepel::geom_text_repel(
+    data = dna_off_target_summary |>
+      dplyr::slice_head(n = 12),
+    aes(label = taxon_label),
+    size = 3,
+    max.overlaps = Inf,
+    show.legend = FALSE
+  ) +
+  scale_x_log10(labels = scales::label_number()) +
+  scale_y_log10(labels = scales::label_number()) +
+  scale_color_manual(values = c(
+    "True" = "#009E73",
+    "Prep control" = "#0072B2",
+    "Air Swab" = "#E69F00",
+    "Cell mix" = "#CC79A7",
+    "Other" = "grey55"
+  )) +
+  scale_size_continuous(labels = scales::label_percent()) +
+  labs(
+    x = "Pooled reads in all other samples (+1)",
+    y = "DNA mix reads (+1)",
+    color = "Largest source library",
+    size = "Prevalence in other samples"
+  ) +
+  theme_classic()
+
+ggsave(
+  file.path(results_dir, "04_DNA_mix_off_target_cross_talk_scatter.png"),
+  dna_cross_talk_plot,
+  width = 11,
+  height = 8,
+  dpi = 300
+)
+
+dna_cross_talk_plot
+```
+
+```{r dna-mix-role-distribution-plot, fig.width=13, fig.height=12}
+top_dna_off_target_asv <- dna_off_target_summary |>
+  dplyr::slice_head(n = 30) |>
+  dplyr::pull(feature_id)
+
+dna_role_plot_data <- dna_off_target_role_summary |>
+  dplyr::filter(feature_id %in% top_dna_off_target_asv) |>
+  dplyr::mutate(
+    ASV_label = factor(
+      ASV_label,
+      levels = rev(
+        dna_off_target_summary$ASV_label[
+          dna_off_target_summary$feature_id %in% top_dna_off_target_asv
+        ]
+      )
+    )
+  )
+
+dna_role_distribution_plot <- ggplot(
+  dna_role_plot_data,
+  aes(
+    x = sample_role,
+    y = ASV_label,
+    size = prevalence,
+    fill = mean_relative_abundance
+  )
+) +
+  geom_point(shape = 21, color = "grey25") +
+  scale_size_continuous(
+    range = c(1, 8),
+    labels = scales::label_percent()
+  ) +
+  scale_fill_viridis_c(
+    option = "C",
+    trans = "sqrt",
+    labels = scales::label_percent(accuracy = 0.01)
+  ) +
+  labs(
+    x = NULL,
+    y = NULL,
+    size = "Sample prevalence",
+    fill = "Mean relative abundance"
+  ) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 30, hjust = 1),
+    panel.grid.major = element_line(color = "grey90", linewidth = 0.3)
+  )
+
+ggsave(
+  file.path(results_dir, "04_DNA_mix_off_target_distribution_by_role.png"),
+  dna_role_distribution_plot,
+  width = 13,
+  height = 12,
+  dpi = 300
+)
+
+dna_role_distribution_plot
+```
+
+# 3) ASVs increasing with serial dilution as candidate contaminants
+
+Cell mix samples are ordered using the experimental serial dilution: Cell-Mock is undiluted, Cell-Mock-1 is diluted 1:10, and Cell-Mock-2 is diluted 1:100. `DNA_ng_uL` is the Qubit concentration measured after DNA extraction and is reported separately. Candidate contaminants are defined descriptively as off target ASVs whose relative abundance increases monotonically as the Cell mix is diluted. Detection in Cycle 3 Prep controls provides additional supporting evidence.
+
+```{r increasing-asv-summary}
+# 실제 serial dilution 순서인 무희석, 1:10, 1:100으로 정렬한다.
+cell_dilution <- metadata |>
+  dplyr::filter(is_cell_mock) |>
+  dplyr::mutate(
+    dilution = dplyr::case_when(
+      Subject == "Cell-Mock" ~ "Undiluted",
+      Subject == "Cell-Mock-1" ~ "1:10",
+      Subject == "Cell-Mock-2" ~ "1:100"
+    ),
+    dilution_factor = dplyr::case_when(
+      dilution == "Undiluted" ~ 1,
+      dilution == "1:10" ~ 10,
+      dilution == "1:100" ~ 100
+    ),
+    dilution_level = factor(
+      dilution,
+      levels = c("Undiluted", "1:10", "1:100")
+    ),
+    Qubit_DNA_ng_uL = concentration_raw
+  ) |>
+  dplyr::arrange(dilution_factor) |>
+  dplyr::select(
+    SampleID,
+    Subject,
+    dilution,
+    dilution_factor,
+    dilution_level,
+    Qubit_DNA_ng_uL
+  )
+
+cell_count <- count_table[cell_dilution$SampleID, , drop = FALSE]
+cell_relative_abundance <- sweep(
+  cell_count,
+  1,
+  rowSums(cell_count),
+  "/"
+)
+
+# 희석 배수가 커질수록 상대풍부도가 단조 증가하는 ASV를 선별한다.
+increasing_flag <- apply(
+  cell_relative_abundance,
+  2,
+  function(x) all(diff(x) >= 0) && x[length(x)] > x[1]
+)
+
+prep_control_ids <- metadata |>
+  dplyr::filter(Cycle == "3", is_prep_control) |>
+  dplyr::pull(SampleID)
+
+prep_control_reads <- colSums(
+  count_table[prep_control_ids, , drop = FALSE]
+)
+prep_control_samples <- colSums(
+  count_table[prep_control_ids, , drop = FALSE] > 0
+)
+
+increasing_asv_summary <- tibble::tibble(
+  feature_id = colnames(cell_relative_abundance),
+  relative_abundance_undiluted = cell_relative_abundance[1, ],
+  relative_abundance_1_10 = cell_relative_abundance[2, ],
+  relative_abundance_1_100 = cell_relative_abundance[3, ],
+  increasing = increasing_flag,
+  prep_control_reads = prep_control_reads[colnames(cell_relative_abundance)],
+  prep_control_samples = prep_control_samples[colnames(cell_relative_abundance)]
+) |>
+  dplyr::filter(increasing) |>
+  dplyr::left_join(taxonomy, by = "feature_id") |>
+  dplyr::mutate(
+    delta_relative_abundance = relative_abundance_1_100 - relative_abundance_undiluted,
+    target_status = dplyr::if_else(
+      Genus %in% target_genera,
+      "Mock target",
+      "Off target"
+    ),
+    detected_in_prep_control = dplyr::if_else(
+      prep_control_reads > 0,
+      "Yes",
+      "No"
+    ),
+    taxon_label = dplyr::case_when(
+      !is.na(Species) & Species != "" ~ Species,
+      !is.na(Genus) & Genus != "Unclassified" ~ paste0(Genus, " sp."),
+      !is.na(Family) & Family != "" ~ paste0(Family, " sp."),
+      TRUE ~ "Unclassified"
+    )
+  ) |>
+  dplyr::arrange(dplyr::desc(delta_relative_abundance))
+
+dilution_candidate_asv <- increasing_asv_summary |>
+  dplyr::filter(target_status == "Off target") |>
+  dplyr::mutate(
+    candidate_evidence = dplyr::if_else(
+      detected_in_prep_control == "Yes",
+      "Dilution increase + Prep control",
+      "Dilution increase only"
+    )
+  )
+
+readr::write_csv(
+  increasing_asv_summary,
+  file.path(results_dir, "04_cell_mix_increasing_ASV.csv")
+)
+readr::write_csv(
+  dilution_candidate_asv,
+  file.path(results_dir, "04_cell_mix_dilution_candidate_contaminant_ASV.csv")
+)
+
+cell_dilution |>
+  knitr::kable(digits = 2)
+
+dilution_candidate_asv |>
+  dplyr::select(
+    feature_id,
+    taxon_label,
+    relative_abundance_undiluted,
+    relative_abundance_1_10,
+    relative_abundance_1_100,
+    delta_relative_abundance,
+    detected_in_prep_control,
+    prep_control_reads,
+    prep_control_samples,
+    candidate_evidence
+  ) |>
+  dplyr::slice_head(n = 30) |>
+  knitr::kable(digits = 5)
+```
+
+```{r increasing-asv-plot, fig.width=15, fig.height=16}
+# 희석에 따라 증가하는 off target ASV 중 증가폭이 큰 상위 20개를 표시한다.
+top_increasing_asv <- dilution_candidate_asv |>
+  dplyr::slice_head(n = 20) |>
+  dplyr::mutate(
+    plot_label = paste0(
+      taxon_label,
+      "\n",
+      substr(feature_id, 1, 8)
+    )
+  )
+
+increasing_asv_plot_data <- as.data.frame(
+  cell_relative_abundance[, top_increasing_asv$feature_id, drop = FALSE],
+  check.names = FALSE
+) |>
+  tibble::rownames_to_column("SampleID") |>
+  tidyr::pivot_longer(
+    cols = -SampleID,
+    names_to = "feature_id",
+    values_to = "relative_abundance"
+  ) |>
+  dplyr::left_join(cell_dilution, by = "SampleID") |>
+  dplyr::left_join(
+    top_increasing_asv |>
+      dplyr::select(feature_id, detected_in_prep_control, plot_label),
+    by = "feature_id"
+  ) |>
+  dplyr::mutate(
+    plot_label = factor(
+      plot_label,
+      levels = top_increasing_asv$plot_label
+    )
+  )
+
+increasing_asv_plot <- ggplot(
+  increasing_asv_plot_data,
+  aes(
+    x = dilution_level,
+    y = relative_abundance,
+    group = feature_id,
+    color = detected_in_prep_control
+  )
+) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2.2) +
+  facet_wrap(~ plot_label, scales = "free_y", ncol = 4) +
+  scale_color_manual(values = c(
+    "Yes" = "#D55E00",
+    "No" = "#0072B2"
+  )) +
+  scale_y_continuous(labels = scales::label_percent(accuracy = 0.01)) +
+  labs(
+    x = "Serial dilution",
+    y = "Relative abundance",
+    color = "Detected in Prep control"
+  ) +
+  theme_classic() +
+  theme(
+    strip.background = element_rect(fill = "white", color = "grey50"),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5),
+    panel.spacing = grid::unit(4, "mm"),
+    legend.position = "top"
+  )
+
+ggsave(
+  file.path(results_dir, "04_cell_mix_dilution_candidate_contaminant_ASV.png"),
+  increasing_asv_plot,
+  width = 15,
+  height = 16,
+  dpi = 300
+)
+
+increasing_asv_plot
+```
+
+## Overlap with pooled decontam at threshold 0.5
+
+Cell mix candidate contaminants are compared at the ASV level with pooled Prevalence and Frequency results generated from True samples and Prep controls at threshold 0.5.
+
+```{r cell-mix-decontam-overlap}
+decontam_flagged_asv <- readr::read_csv(
+  file.path(results_dir, "03_flagged_ASV.csv"),
+  show_col_types = FALSE
+)
+
+prevalence_05_asv <- decontam_flagged_asv |>
+  dplyr::filter(
+    batch_mode == "pooled",
+    control_scenario == "prep_control_only",
+    method == "prevalence",
+    dplyr::near(threshold, 0.5)
+  ) |>
+  dplyr::pull(feature_id) |>
+  unique()
+
+frequency_05_asv <- decontam_flagged_asv |>
+  dplyr::filter(
+    batch_mode == "pooled",
+    control_scenario == "prep_control_only",
+    method == "frequency",
+    dplyr::near(threshold, 0.5)
+  ) |>
+  dplyr::pull(feature_id) |>
+  unique()
+
+cell_candidate_asv <- dilution_candidate_asv$feature_id
+all_candidate_asv <- union(
+  cell_candidate_asv,
+  union(prevalence_05_asv, frequency_05_asv)
+)
+
+three_way_overlap_asv <- tibble::tibble(
+  feature_id = all_candidate_asv,
+  in_cell_mix = feature_id %in% cell_candidate_asv,
+  in_prevalence = feature_id %in% prevalence_05_asv,
+  in_frequency = feature_id %in% frequency_05_asv
+) |>
+  dplyr::mutate(
+    membership = dplyr::case_when(
+      in_cell_mix & in_prevalence & in_frequency ~ "All three",
+      in_cell_mix & in_prevalence ~ "Cell mix + Prevalence",
+      in_cell_mix & in_frequency ~ "Cell mix + Frequency",
+      in_prevalence & in_frequency ~ "Prevalence + Frequency",
+      in_cell_mix ~ "Cell mix only",
+      in_prevalence ~ "Prevalence only",
+      in_frequency ~ "Frequency only"
+    )
+  ) |>
+  dplyr::left_join(taxonomy, by = "feature_id") |>
+  dplyr::mutate(
+    taxon_label = dplyr::case_when(
+      !is.na(Species) & Species != "" ~ Species,
+      !is.na(Genus) & Genus != "Unclassified" ~ paste0(Genus, " sp."),
+      !is.na(Family) & Family != "" ~ paste0(Family, " sp."),
+      TRUE ~ "Unclassified"
+    )
+  )
+
+cell_overlap_asv <- dilution_candidate_asv |>
+  dplyr::mutate(
+    in_prevalence = feature_id %in% prevalence_05_asv,
+    in_frequency = feature_id %in% frequency_05_asv,
+    overlap_group = dplyr::case_when(
+      in_prevalence & in_frequency ~ "All three",
+      in_prevalence ~ "Cell mix + Prevalence",
+      in_frequency ~ "Cell mix + Frequency",
+      TRUE ~ "Cell mix only"
+    )
+  )
+
+cell_overlap_summary <- cell_overlap_asv |>
+  dplyr::count(overlap_group, name = "n_ASVs") |>
+  dplyr::mutate(
+    percent_of_cell_candidates = 100 * n_ASVs / sum(n_ASVs),
+    overlap_group = factor(
+      overlap_group,
+      levels = c(
+        "Cell mix only",
+        "Cell mix + Prevalence",
+        "Cell mix + Frequency",
+        "All three"
+      )
+    )
+  ) |>
+  dplyr::arrange(overlap_group)
+
+set_size_summary <- tibble::tibble(
+  method = c(
+    "Cell mix dilution candidates",
+    "Pooled Prevalence, threshold 0.5",
+    "Pooled Frequency, threshold 0.5"
+  ),
+  n_ASVs = c(
+    length(cell_candidate_asv),
+    length(prevalence_05_asv),
+    length(frequency_05_asv)
+  )
+)
+
+readr::write_csv(
+  three_way_overlap_asv,
+  file.path(results_dir, "04_cell_mix_decontam_overlap_ASV.csv")
+)
+readr::write_csv(
+  cell_overlap_summary,
+  file.path(results_dir, "04_cell_mix_decontam_overlap_summary.csv")
+)
+
+set_size_summary |>
+  knitr::kable()
+
+cell_overlap_summary |>
+  knitr::kable(digits = 1)
+
+cell_overlap_asv |>
+  dplyr::filter(overlap_group == "All three") |>
+  dplyr::select(
+    feature_id,
+    taxon_label,
+    relative_abundance_undiluted,
+    relative_abundance_1_10,
+    relative_abundance_1_100,
+    detected_in_prep_control,
+    prep_control_reads,
+    prep_control_samples
+  ) |>
+  dplyr::arrange(dplyr::desc(relative_abundance_1_100)) |>
+  knitr::kable(digits = 5)
+```
+
+```{r cell-mix-decontam-overlap-plot, fig.width=10, fig.height=7}
+cell_overlap_plot <- ggplot(
+  cell_overlap_summary,
+  aes(x = overlap_group, y = n_ASVs, fill = overlap_group)
+) +
+  geom_col(width = 0.7, show.legend = FALSE) +
+  geom_text(
+    aes(
+      label = paste0(
+        n_ASVs,
+        " (",
+        sprintf("%.1f", percent_of_cell_candidates),
+        "%)"
+      )
+    ),
+    vjust = -0.4,
+    size = 4
+  ) +
+  scale_fill_manual(values = c(
+    "Cell mix only" = "grey65",
+    "Cell mix + Prevalence" = "#0072B2",
+    "Cell mix + Frequency" = "#D55E00",
+    "All three" = "#009E73"
+  )) +
+  scale_y_continuous(
+    expand = expansion(mult = c(0, 0.12))
+  ) +
+  labs(
+    x = NULL,
+    y = "Cell mix candidate contaminant ASVs"
+  ) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 25, hjust = 1)
+  )
+
+ggsave(
+  file.path(results_dir, "04_cell_mix_decontam_overlap.png"),
+  cell_overlap_plot,
+  width = 10,
+  height = 7,
+  dpi = 300
+)
+
+cell_overlap_plot
+```
+
+## Relative abundance of candidate contaminants in True samples
+
+The following analysis compares the mean relative abundance in True samples for each individual method, each pairwise intersection, and the intersection of all three approaches. Pairwise intersections are inclusive and therefore contain ASVs shared by all three methods.
+
+```{r true-sample-contaminant-composition}
+true_sample_ids <- metadata |>
+  dplyr::filter(is_true) |>
+  dplyr::pull(SampleID)
+
+true_count <- count_table[true_sample_ids, , drop = FALSE]
+true_relative_abundance <- sweep(
+  true_count,
+  1,
+  rowSums(true_count),
+  "/"
+)
+
+asv_true_abundance <- tibble::tibble(
+  feature_id = colnames(true_relative_abundance),
+  mean_true_relative_abundance = colMeans(true_relative_abundance),
+  median_true_relative_abundance = apply(
+    true_relative_abundance,
+    2,
+    median
+  ),
+  max_true_relative_abundance = apply(
+    true_relative_abundance,
+    2,
+    max
+  ),
+  true_sample_prevalence = colMeans(true_count > 0),
+  total_true_reads = colSums(true_count)
+) |>
+  dplyr::left_join(taxonomy, by = "feature_id") |>
+  dplyr::mutate(
+    Phylum = dplyr::if_else(
+      is.na(Phylum) | Phylum == "",
+      "Unclassified",
+      as.character(Phylum)
+    ),
+    taxon_label = dplyr::case_when(
+      !is.na(Species) & Species != "" ~ Species,
+      !is.na(Genus) & Genus != "Unclassified" ~ paste0(Genus, " sp."),
+      !is.na(Family) & Family != "" ~ paste0(Family, " sp."),
+      TRUE ~ "Unclassified"
+    )
+  )
+
+comparison_set_list <- list(
+  "Cell mix" = cell_candidate_asv,
+  "Prevalence" = prevalence_05_asv,
+  "Frequency" = frequency_05_asv,
+  "Cell mix ∩ Prevalence" = intersect(
+    cell_candidate_asv,
+    prevalence_05_asv
+  ),
+  "Cell mix ∩ Frequency" = intersect(
+    cell_candidate_asv,
+    frequency_05_asv
+  ),
+  "Prevalence ∩ Frequency" = intersect(
+    prevalence_05_asv,
+    frequency_05_asv
+  ),
+  "All three" = Reduce(
+    intersect,
+    list(cell_candidate_asv, prevalence_05_asv, frequency_05_asv)
+  )
+)
+
+comparison_set_order <- names(comparison_set_list)
+set_abundance_list <- vector("list", length(comparison_set_list))
+set_taxa_list <- vector("list", length(comparison_set_list))
+
+for (i in seq_along(comparison_set_list)) {
+  set_name <- names(comparison_set_list)[i]
+  set_asv <- comparison_set_list[[i]]
+
+  set_asv_abundance <- asv_true_abundance |>
+    dplyr::filter(feature_id %in% set_asv)
+
+  set_abundance_list[[i]] <- tibble::tibble(
+    comparison_set = set_name,
+    n_flagged_ASVs = length(set_asv),
+    n_detected_ASVs_in_true = sum(set_asv_abundance$total_true_reads > 0),
+    n_major_ASVs_in_true = sum(
+      set_asv_abundance$mean_true_relative_abundance >= 0.001
+    ),
+    mean_total_relative_abundance = sum(
+      set_asv_abundance$mean_true_relative_abundance
+    ),
+    median_total_relative_abundance = median(
+      rowSums(
+        true_relative_abundance[, set_asv, drop = FALSE]
+      )
+    )
+  )
+
+  set_taxa_list[[i]] <- set_asv_abundance |>
+    dplyr::group_by(Phylum, taxon_label) |>
+    dplyr::summarise(
+      mean_true_relative_abundance = sum(mean_true_relative_abundance),
+      n_ASVs = dplyr::n(),
+      .groups = "drop"
+    ) |>
+    dplyr::mutate(comparison_set = set_name, .before = 1)
+}
+
+set_true_abundance_summary <- dplyr::bind_rows(set_abundance_list) |>
+  dplyr::mutate(
+    comparison_set = factor(
+      comparison_set,
+      levels = comparison_set_order
+    )
+  )
+
+set_taxa_composition <- dplyr::bind_rows(set_taxa_list) |>
+  dplyr::mutate(
+    comparison_set = factor(
+      comparison_set,
+      levels = comparison_set_order
+    )
+  )
+
+top_true_taxa <- set_taxa_composition |>
+  dplyr::filter(comparison_set %in% c("Cell mix", "Prevalence", "Frequency")) |>
+  dplyr::group_by(Phylum, taxon_label) |>
+  dplyr::summarise(
+    maximum_mean_abundance = max(mean_true_relative_abundance),
+    .groups = "drop"
+  ) |>
+  dplyr::slice_max(
+    maximum_mean_abundance,
+    n = 15,
+    with_ties = FALSE
+  )
+
+set_taxa_plot_data <- set_taxa_composition |>
+  dplyr::mutate(
+    Taxon_plot = dplyr::if_else(
+      taxon_label %in% top_true_taxa$taxon_label,
+      taxon_label,
+      "Other"
+    ),
+    Phylum_plot = dplyr::if_else(
+      Taxon_plot == "Other",
+      "Other",
+      Phylum
+    )
+  ) |>
+  dplyr::group_by(comparison_set, Phylum = Phylum_plot, Taxon_plot) |>
+  dplyr::summarise(
+    mean_true_relative_abundance = sum(mean_true_relative_abundance),
+    .groups = "drop"
+  )
+
+taxa_color_input <- set_taxa_plot_data |>
+  dplyr::filter(Taxon_plot != "Other") |>
+  dplyr::group_by(Phylum, Taxon_plot) |>
+  dplyr::summarise(
+    sum.Abundance = sum(mean_true_relative_abundance),
+    .groups = "drop"
+  ) |>
+  dplyr::arrange(dplyr::desc(sum.Abundance)) |>
+  dplyr::arrange(Phylum)
+
+# functions.R의 taxa_plot과 동일하게 Phylum별 RColorBrewer 계열을 사용한다.
+taxa_color <- character()
+
+for (phylum_name in unique(taxa_color_input$Phylum)) {
+  phylum_taxa <- taxa_color_input |>
+    dplyr::filter(Phylum == phylum_name)
+
+  palette_name <- dplyr::case_when(
+    grepl("^(Actinobacteria|Actinobacteriota|Actinomycetota)", phylum_name) ~ "Reds",
+    grepl("^(Firmicutes|Bacillota)", phylum_name) ~ "Blues",
+    grepl("^(Bacteroidetes|Bacteroidota)", phylum_name) ~ "Purples",
+    grepl("^(Proteobacteria|Pseudomonadota)", phylum_name) ~ "Greens",
+    grepl("^(Fusobacteria|Fusobacteriota)", phylum_name) ~ "YlOrBr",
+    grepl("^Ascomycota", phylum_name) ~ "RdPu",
+    grepl("^Basidiomycota", phylum_name) ~ "YlOrBr",
+    TRUE ~ "Spectral"
+  )
+
+  n_phylum_taxa <- nrow(phylum_taxa)
+
+  if (n_phylum_taxa == 1) {
+    phylum_color <- rev(
+      RColorBrewer::brewer.pal(9, palette_name)
+    )[5]
+  } else if (n_phylum_taxa == 2) {
+    phylum_color <- rev(
+      RColorBrewer::brewer.pal(9, palette_name)
+    )[c(3, 7)]
+  } else if (n_phylum_taxa <= 9) {
+    phylum_color <- rev(
+      RColorBrewer::brewer.pal(n_phylum_taxa, palette_name)
+    )
+  } else {
+    phylum_color <- grDevices::colorRampPalette(
+      rev(RColorBrewer::brewer.pal(9, palette_name))
+    )(n_phylum_taxa)
+  }
+
+  names(phylum_color) <- phylum_taxa$Taxon_plot
+  taxa_color <- c(taxa_color, phylum_color)
+}
+
+taxa_color <- c(taxa_color, Other = "#D3D3D3")
+taxa_color <- taxa_color[!duplicated(names(taxa_color))]
+taxon_levels <- names(taxa_color)
+
+set_taxa_plot_data <- set_taxa_plot_data |>
+  dplyr::mutate(
+    Taxon_plot = factor(
+      Taxon_plot,
+      levels = taxon_levels
+    )
+  )
+
+contaminant_asv_true_abundance <- asv_true_abundance |>
+  dplyr::filter(feature_id %in% all_candidate_asv) |>
+  dplyr::left_join(
+    three_way_overlap_asv |>
+      dplyr::select(feature_id, membership),
+    by = "feature_id"
+  ) |>
+  dplyr::mutate(
+    ASV_label = paste0(taxon_label, " | ", substr(feature_id, 1, 8))
+  ) |>
+  dplyr::arrange(dplyr::desc(mean_true_relative_abundance))
+
+readr::write_csv(
+  set_true_abundance_summary,
+  file.path(results_dir, "04_contaminant_set_true_abundance_summary.csv")
+)
+readr::write_csv(
+  set_taxa_composition,
+  file.path(results_dir, "04_contaminant_taxa_true_composition.csv")
+)
+readr::write_csv(
+  contaminant_asv_true_abundance,
+  file.path(results_dir, "04_contaminant_ASV_true_abundance.csv")
+)
+
+set_true_abundance_summary |>
+  dplyr::mutate(
+    mean_total_relative_abundance = 100 * mean_total_relative_abundance,
+    median_total_relative_abundance = 100 * median_total_relative_abundance
+  ) |>
+  knitr::kable(
+    digits = 3,
+    col.names = c(
+      "Contaminant set",
+      "Flagged ASVs",
+      "Detected ASVs in True",
+      "Major ASVs in True",
+      "Mean relative abundance (%)",
+      "Median relative abundance (%)"
+    )
+  )
+```
+
+```{r true-sample-contaminant-composition-plot, fig.width=15, fig.height=8}
+true_taxa_composition_plot <- ggplot(
+  set_taxa_plot_data,
+  aes(
+    x = comparison_set,
+    y = mean_true_relative_abundance,
+    fill = Taxon_plot
+  )
+) +
+  geom_col(width = 0.75) +
+  scale_fill_manual(values = taxa_color) +
+  scale_y_continuous(
+    labels = scales::label_percent(accuracy = 0.1),
+    expand = c(0, 0)
+  ) +
+  labs(
+    x = NULL,
+    y = "Mean relative abundance in True samples",
+    fill = "Taxon"
+  ) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 35, hjust = 1),
+    legend.position = "right"
+  )
+
+ggsave(
+  file.path(results_dir, "04_contaminant_taxa_true_composition.png"),
+  true_taxa_composition_plot,
+  width = 15,
+  height = 8,
+  dpi = 300
+)
+
+true_taxa_composition_plot
+```
+
+```{r major-contaminant-asv-plot, fig.width=13, fig.height=10}
+major_contaminant_asv <- contaminant_asv_true_abundance |>
+  dplyr::slice_max(
+    mean_true_relative_abundance,
+    n = 30,
+    with_ties = FALSE
+  ) |>
+  dplyr::mutate(
+    ASV_label = factor(
+      ASV_label,
+      levels = rev(ASV_label)
+    )
+  )
+
+major_contaminant_asv_plot <- ggplot(
+  major_contaminant_asv,
+  aes(
+    x = mean_true_relative_abundance,
+    y = ASV_label,
+    color = membership,
+    size = true_sample_prevalence
+  )
+) +
+  geom_point(alpha = 0.85) +
+  scale_x_continuous(labels = scales::label_percent(accuracy = 0.01)) +
+  scale_size_continuous(labels = scales::label_percent()) +
+  scale_color_manual(values = c(
+    "Cell mix only" = "grey60",
+    "Prevalence only" = "#0072B2",
+    "Frequency only" = "#D55E00",
+    "Cell mix + Prevalence" = "#56B4E9",
+    "Cell mix + Frequency" = "#E69F00",
+    "Prevalence + Frequency" = "#CC79A7",
+    "All three" = "#009E73"
+  )) +
+  labs(
+    x = "Mean relative abundance in True samples",
+    y = NULL,
+    color = "Detection evidence",
+    size = "True sample prevalence"
+  ) +
+  theme_classic() +
+  theme(legend.position = "right")
+
+ggsave(
+  file.path(results_dir, "04_major_contaminant_ASV_in_true_samples.png"),
+  major_contaminant_asv_plot,
+  width = 13,
+  height = 10,
+  dpi = 300
+)
+
+major_contaminant_asv_plot
+```
+
+# 4) Genus composition across methods and thresholds
+
+Pooled contaminant ASVs identified from True samples and the combined Prep controls and Air Swabs are applied to every sample for visualization. Positive controls are displayed but are not used to train the contaminant classification.
+
+```{r all-sample-genus-long-format}
+taxonomy_plot_grid <- tidyr::crossing(
+  method = c("prevalence", "frequency"),
+  threshold = c(0.1, 0.3, 0.5)
+) |>
+  dplyr::mutate(
+    method_definition = unname(method_label[method]),
+    threshold_label = factor(
+      paste0("Threshold ", threshold),
+      levels = paste0("Threshold ", c(0.1, 0.3, 0.5))
+    )
+  )
+
+genus_long_list <- vector("list", nrow(taxonomy_plot_grid))
+
+for (i in seq_len(nrow(taxonomy_plot_grid))) {
+  setting <- taxonomy_plot_grid[i, ]
+
+  removed_asv <- decontam_flagged_asv |>
+    dplyr::filter(
+      batch_mode == "pooled",
+      control_scenario == "prep_and_air_swab",
+      method == setting$method,
+      dplyr::near(threshold, setting$threshold)
+    ) |>
+    dplyr::pull(feature_id) |>
+    unique()
+
+  filtered_count <- count_table
+  filtered_count[, colnames(filtered_count) %in% removed_asv] <- 0
+
+  genus_long_list[[i]] <- as.data.frame(
+    filtered_count,
+    check.names = FALSE
+  ) |>
+    tibble::rownames_to_column("SampleID") |>
+    tidyr::pivot_longer(
+      cols = -SampleID,
+      names_to = "feature_id",
+      values_to = "read_count"
+    ) |>
+    dplyr::filter(read_count > 0) |>
+    dplyr::left_join(
+      taxonomy |>
+        dplyr::select(feature_id, Phylum, Genus),
+      by = "feature_id"
+    ) |>
+    dplyr::mutate(
+      Phylum = dplyr::if_else(
+        is.na(Phylum) | Phylum == "",
+        "Unclassified",
+        as.character(Phylum)
+      ),
+      Genus = dplyr::if_else(
+        is.na(Genus) | Genus == "",
+        "Unclassified",
+        as.character(Genus)
+      )
+    ) |>
+    dplyr::group_by(SampleID, Phylum, Genus) |>
+    dplyr::summarise(
+      read_count = sum(read_count),
+      .groups = "drop"
+    ) |>
+    dplyr::mutate(
+      method = setting$method,
+      method_definition = setting$method_definition,
+      threshold = setting$threshold,
+      threshold_label = setting$threshold_label,
+      .before = 1
+    )
+}
+
+all_sample_genus_long <- dplyr::bind_rows(genus_long_list)
+
+sample_plot_metadata <- metadata |>
+  dplyr::mutate(
+    sample_group = dplyr::case_when(
+      is_true ~ "True",
+      Sample_Control == "NC" & control_type == "Prep control" ~ "NC | Prep control",
+      Sample_Control == "NC" & control_type == "Air Swab" ~ "NC | Air Swab",
+      Sample_Control == "PC" & control_type == "Cell_mix" ~ "PC | Cell mix",
+      Sample_Control == "PC" & control_type == "DNA_mix" ~ "PC | DNA mix",
+      TRUE ~ "Other"
+    ),
+    sample_group = factor(
+      sample_group,
+      levels = c(
+        "True",
+        "NC | Prep control",
+        "NC | Air Swab",
+        "PC | Cell mix",
+        "PC | DNA mix",
+        "Other"
+      )
+    ),
+    sample_number = suppressWarnings(as.numeric(No))
+  ) |>
+  dplyr::arrange(sample_group, Cycle, sample_number)
+
+sample_id_levels <- sample_plot_metadata$SampleID
+
+top_genus_key <- all_sample_genus_long |>
+  dplyr::mutate(Genus_key = paste0(Phylum, "_", Genus)) |>
+  dplyr::group_by(Phylum, Genus_key) |>
+  dplyr::summarise(
+    total_reads = sum(read_count),
+    .groups = "drop"
+  ) |>
+  dplyr::slice_max(total_reads, n = 20, with_ties = FALSE)
+
+top_phylum <- unique(top_genus_key$Phylum)
+
+all_sample_genus_long <- all_sample_genus_long |>
+  dplyr::left_join(
+    sample_plot_metadata |>
+      dplyr::select(SampleID, sample_group),
+    by = "SampleID"
+  ) |>
+  dplyr::mutate(
+    Genus_key = paste0(Phylum, "_", Genus),
+    Genus_plot = dplyr::case_when(
+      Genus_key %in% top_genus_key$Genus_key ~ Genus_key,
+      Phylum %in% top_phylum ~ paste0(Phylum, "_Other"),
+      TRUE ~ "Other"
+    ),
+    Phylum_plot = dplyr::if_else(
+      Genus_plot == "Other",
+      "Other",
+      Phylum
+    ),
+    SampleID = factor(SampleID, levels = sample_id_levels),
+    method_definition = factor(
+      method_definition,
+      levels = c("Prevalence", "Frequency")
+    )
+  ) |>
+  dplyr::group_by(
+    method,
+    method_definition,
+    threshold,
+    threshold_label,
+    sample_group,
+    SampleID,
+    Phylum = Phylum_plot,
+    Genus_plot
+  ) |>
+  dplyr::summarise(
+    read_count = sum(read_count),
+    .groups = "drop"
+  ) |>
+  dplyr::group_by(method, threshold, SampleID) |>
+  dplyr::mutate(
+    relative_abundance = read_count / sum(read_count)
+  ) |>
+  dplyr::ungroup()
+
+genus_color_input <- all_sample_genus_long |>
+  dplyr::group_by(Phylum, Genus_plot) |>
+  dplyr::summarise(
+    sum.Abundance = sum(read_count),
+    .groups = "drop"
+  ) |>
+  dplyr::arrange(dplyr::desc(sum.Abundance)) |>
+  dplyr::arrange(Phylum)
+
+# functions.R의 taxa_plot과 같은 Phylum별 palette를 적용한다.
+genus_color <- character()
+
+for (phylum_name in unique(genus_color_input$Phylum)) {
+  phylum_taxa <- genus_color_input |>
+    dplyr::filter(Phylum == phylum_name)
+
+  palette_name <- dplyr::case_when(
+    grepl("^(Actinobacteria|Actinobacteriota|Actinomycetota)", phylum_name) ~ "Reds",
+    grepl("^(Firmicutes|Bacillota)", phylum_name) ~ "Blues",
+    grepl("^(Bacteroidetes|Bacteroidota)", phylum_name) ~ "Purples",
+    grepl("^(Proteobacteria|Pseudomonadota)", phylum_name) ~ "Greens",
+    grepl("^(Fusobacteria|Fusobacteriota)", phylum_name) ~ "YlOrBr",
+    phylum_name == "Other" ~ "Greys",
+    TRUE ~ "Spectral"
+  )
+
+  n_phylum_taxa <- nrow(phylum_taxa)
+
+  if (n_phylum_taxa == 1) {
+    phylum_color <- rev(
+      RColorBrewer::brewer.pal(9, palette_name)
+    )[5]
+  } else if (n_phylum_taxa == 2) {
+    phylum_color <- rev(
+      RColorBrewer::brewer.pal(9, palette_name)
+    )[c(3, 7)]
+  } else if (n_phylum_taxa <= 9) {
+    phylum_color <- rev(
+      RColorBrewer::brewer.pal(n_phylum_taxa, palette_name)
+    )
+  } else {
+    phylum_color <- grDevices::colorRampPalette(
+      rev(RColorBrewer::brewer.pal(9, palette_name))
+    )(n_phylum_taxa)
+  }
+
+  names(phylum_color) <- phylum_taxa$Genus_plot
+  genus_color <- c(genus_color, phylum_color)
+}
+
+genus_color <- genus_color[!duplicated(names(genus_color))]
+genus_levels <- names(genus_color)
+
+all_sample_genus_long <- all_sample_genus_long |>
+  dplyr::mutate(
+    Genus_plot = factor(Genus_plot, levels = genus_levels)
+  )
+
+readr::write_csv(
+  all_sample_genus_long,
+  file.path(
+    results_dir,
+    "04_all_samples_genus_long_threshold_0.1_0.3_0.5.csv"
+  )
+)
+```
+
+```{r all-sample-genus-read-count-plot, fig.width=32, fig.height=18}
+all_sample_genus_read_count_plot <- ggplot(
+  all_sample_genus_long,
+  aes(x = SampleID, y = read_count, fill = Genus_plot)
+) +
+  geom_col(width = 0.9) +
+  ggh4x::facet_grid2(
+    rows = vars(sample_group),
+    cols = vars(method_definition, threshold_label),
+    scales = "free",
+    independent = "x"
+  ) +
+  scale_fill_manual(values = genus_color, drop = FALSE) +
+  scale_y_continuous(
+    labels = scales::label_comma(),
+    expand = c(0, 0)
+  ) +
+  labs(
+    x = NULL,
+    y = "Read count after decontamination",
+    fill = "Phylum_Genus"
+  ) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 5),
+    strip.background = element_rect(fill = "white", color = "grey50"),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 0.4),
+    panel.spacing = grid::unit(3, "mm"),
+    legend.position = "right"
+  )
+
+ggsave(
+  file.path(results_dir, "04_all_samples_genus_read_count.png"),
+  all_sample_genus_read_count_plot,
+  width = 32,
+  height = 18,
+  dpi = 300
+)
+
+all_sample_genus_read_count_plot
+```
+
+```{r all-sample-genus-relative-abundance-plot, fig.width=32, fig.height=18}
+all_sample_genus_relative_abundance_plot <- ggplot(
+  all_sample_genus_long,
+  aes(x = SampleID, y = relative_abundance, fill = Genus_plot)
+) +
+  geom_col(width = 0.9) +
+  ggh4x::facet_grid2(
+    rows = vars(sample_group),
+    cols = vars(method_definition, threshold_label),
+    scales = "free_x",
+    independent = "x"
+  ) +
+  scale_fill_manual(values = genus_color, drop = FALSE) +
+  scale_y_continuous(
+    labels = scales::label_percent(),
+    limits = c(0, 1),
+    expand = c(0, 0)
+  ) +
+  labs(
+    x = NULL,
+    y = "Relative abundance after decontamination",
+    fill = "Phylum_Genus"
+  ) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 5),
+    strip.background = element_rect(fill = "white", color = "grey50"),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 0.4),
+    panel.spacing = grid::unit(3, "mm"),
+    legend.position = "right"
+  )
+
+ggsave(
+  file.path(results_dir, "04_all_samples_genus_relative_abundance.png"),
+  all_sample_genus_relative_abundance_plot,
+  width = 32,
+  height = 18,
+  dpi = 300
+)
+
+all_sample_genus_relative_abundance_plot
+```
+
+# 5) Cycle 3 decontam analysis using Prep controls
 
 ```{r cycle3-balance}
 # Positive control은 contaminant 판정에서 제외하고 검증에만 사용한다.
@@ -326,7 +1682,7 @@ knitr::kable(cycle3_balance)
 ```
 
 ```{r cycle3-decontam-function}
-# Cycle 3에서 control 정의와 method 조합별 contaminant ASV를 판정한다.
+# Cell mix와 동일한 DNA 추출 Cycle 3의 Prep control로 contaminant ASV를 판정한다.
 run_cycle3_decontam <- function(control_scenario, method) {
   meta <- data.frame(sample_data(phy), check.names = FALSE)
 
@@ -446,12 +1802,15 @@ readr::write_csv(
 )
 ```
 
-# 3) Cell mock profiles after decontamination
+# 6) Cell and DNA mock profiles after decontamination
 
-```{r filtered-cell-profiles}
+```{r filtered-mock-profiles}
+# 같은 contaminant ASV 목록을 Cell mix와 DNA mix에 적용한다.
+mock_sample_ids <- c(cell_mock_ids, dna_mock_id)
+
 profile_list <- vector(
   "list",
-  nrow(analysis_grid) * length(thresholds) * length(cell_mock_ids)
+  nrow(analysis_grid) * length(thresholds) * length(mock_sample_ids)
 )
 profile_index <- 1
 
@@ -467,12 +1826,17 @@ for (run_id in names(cycle3_runs)) {
       ) |>
       dplyr::pull(feature_id)
 
-    for (sample_id in cell_mock_ids) {
+    for (sample_id in mock_sample_ids) {
       profile_list[[profile_index]] <- make_genus_profile(
         sample_id,
         removed_asv
       ) |>
         dplyr::mutate(
+          mock_type = dplyr::if_else(
+            sample_id %in% cell_mock_ids,
+            "Cell mix",
+            "DNA mix"
+          ),
           control_scenario = run$control_scenario,
           control_definition = unname(scenario_label[run$control_scenario]),
           method = run$method,
@@ -487,39 +1851,68 @@ for (run_id in names(cycle3_runs)) {
   }
 }
 
-filtered_cell_profile <- dplyr::bind_rows(profile_list)
+filtered_mock_profile <- dplyr::bind_rows(profile_list)
 
+# 정확도 평가는 기존과 동일하게 Cell mix 반복 시료를 사용한다.
+filtered_cell_profile <- filtered_mock_profile |>
+  dplyr::filter(mock_type == "Cell mix")
+
+readr::write_csv(
+  filtered_mock_profile,
+  file.path(results_dir, "04_filtered_cell_and_dna_mock_genus_profile.csv")
+)
 readr::write_csv(
   filtered_cell_profile,
   file.path(results_dir, "04_filtered_cell_mock_genus_profile.csv")
 )
 ```
 
-## Composition at threshold 0.5
+## Cell mix and DNA mix composition across thresholds 0.1 to 0.9
 
-```{r threshold-05-composition, fig.width=15, fig.height=10}
-composition_05 <- filtered_cell_profile |>
-  dplyr::filter(threshold == 0.5) |>
+```{r threshold-01-09-composition, fig.width=36, fig.height=20}
+# 서로 다른 희석 조건인 Cell mix 3개와 DNA mix를 각각 표시한다.
+mock_axis_label <- metadata |>
+  dplyr::filter(SampleID %in% mock_sample_ids) |>
+  dplyr::select(SampleID, Subject) |>
+  dplyr::mutate(
+    mock_sample = factor(
+      Subject,
+      levels = Subject[match(mock_sample_ids, SampleID)]
+    )
+  )
+
+composition_01_09 <- filtered_mock_profile |>
+  dplyr::filter(threshold >= 0.1, threshold <= 0.9) |>
+  dplyr::left_join(mock_axis_label, by = "SampleID") |>
   dplyr::mutate(
     Genus_plot = dplyr::if_else(Genus %in% target_genera, Genus, "Other")
   ) |>
   dplyr::group_by(
     control_definition,
     method_definition,
-    SampleID,
+    threshold,
+    mock_sample,
     Genus_plot
   ) |>
   dplyr::summarise(
     relative_abundance = sum(relative_abundance),
     .groups = "drop"
+  ) |>
+  dplyr::mutate(
+    threshold_label = factor(
+      paste0("Threshold ", sprintf("%.1f", threshold)),
+      levels = paste0("Threshold ", sprintf("%.1f", seq(0.1, 0.9, by = 0.1)))
+    )
   )
 
-composition_05_plot <- ggplot(
-  composition_05,
-  aes(x = SampleID, y = relative_abundance, fill = Genus_plot)
+composition_01_09_plot <- ggplot(
+  composition_01_09,
+  aes(x = mock_sample, y = relative_abundance, fill = Genus_plot)
 ) +
   geom_col(width = 0.8) +
-  facet_grid(method_definition ~ control_definition) +
+  facet_grid(
+    method_definition + control_definition ~ threshold_label
+  ) +
   scale_fill_manual(values = mock_taxa_color) +
   scale_y_continuous(labels = scales::label_percent(), expand = c(0, 0)) +
   labs(
@@ -529,7 +1922,7 @@ composition_05_plot <- ggplot(
   ) +
   theme_classic() +
   theme(
-    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
     strip.background = element_rect(fill = "white", color = "grey50"),
     panel.border = element_rect(color = "black", fill = NA, linewidth = 0.6),
     panel.spacing = grid::unit(4, "mm"),
@@ -537,17 +1930,24 @@ composition_05_plot <- ggplot(
   )
 
 ggsave(
-  file.path(results_dir, "04_cell_mock_composition_threshold_0.5.png"),
-  composition_05_plot,
-  width = 15,
-  height = 10,
+  file.path(results_dir, "04_cell_and_dna_mock_composition_threshold_0.1_0.9.png"),
+  composition_01_09_plot,
+  width = 36,
+  height = 20,
   dpi = 300
 )
 
-composition_05_plot
+readr::write_csv(
+  composition_01_09,
+  file.path(results_dir, "04_cell_and_dna_mock_composition_threshold_0.1_0.9.csv")
+)
+
+composition_01_09_plot
 ```
 
-# 4) Accuracy metrics
+# 7) Accuracy metrics
+
+DNA mix is included only in the composition plots. Detection metrics and Bray Curtis distance are calculated using the three Cell mix replicates. The observed DNA mix composition is retained only as a reference profile for evaluating the Cell mix samples.
 
 The accuracy metrics follow the ITS2 mock benchmark: detection based F1 score, precision, recall and false discovery rate, together with abundance based R squared and Bray Curtis distance. Higher F1 and R squared and lower Bray Curtis distance indicate closer agreement with the reference.
 

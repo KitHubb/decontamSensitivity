@@ -1,0 +1,526 @@
+---
+title: "Karstens et al. 2019: three-level decontamination benchmark"
+author: "decontamSensitivity project"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: bootstrap
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, message = FALSE, warning = FALSE,
+  fig.align = "center", fig.width = 12, fig.height = 7, dpi = 180
+)
+options(stringsAsFactors = FALSE)
+set.seed(2019)
+```
+
+# 1. Benchmark scope
+
+This analysis uses the processed even mock-community dilution data and the
+sequence-level gold standard released by Karstens et al. (2019). The dataset
+contains nine three-fold mock dilutions (`D0`--`D8`), one extraction blank,
+1,414 ASVs, nine expected mock ASVs, and 1,405 contaminant ASVs.
+
+The contingency-table convention follows the public MicrobIEM benchmarking
+scripts: a contaminant read removed is a true positive (TP), an expected mock
+read retained is a true negative (TN), an expected mock read removed is a false
+positive (FP), and a contaminant read retained is a false negative (FN).
+
+```{r packages-paths}
+library(phyloseq)
+library(decontam)
+library(SCRuB)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(readr)
+library(patchwork)
+
+input_dir <- file.path(
+  "Input", "Test11_Karstens2019", "Karstens2019_official"
+)
+input_path <- file.path(input_dir, "mockDilutionsPrep.RData")
+microbiem_source <- paste0(
+  "D:/KSY/Project/10.AT_multicenter/Results/260909_reanalysis/",
+  "tmp/tool_sources/MicrobIEM/MicrobIEM_decontamination.R"
+)
+output_dir <- file.path("Results", "Karstens2019", "07_three_level_benchmark")
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+
+stopifnot(file.exists(input_path), file.exists(microbiem_source))
+source(microbiem_source)
+
+method_colors <- c(
+  Prevalence = "#1B9E77",
+  Frequency = "#D95F02",
+  Combined = "#7570B3",
+  MicrobIEM = "#66A61E",
+  `SCRuB non-spatial` = "#E7298A"
+)
+intensity_levels <- c("Default / reference", "Intermediate", "Aggressive")
+theme_set(theme_bw(base_size = 11))
+```
+
+# 2. Input and gold standard
+
+```{r load-input}
+data_environment <- new.env(parent = emptyenv())
+load(input_path, envir = data_environment)
+ps <- data_environment$ps
+mock_taxa <- as.character(data_environment$mock_taxa)
+
+count_matrix <- as(otu_table(ps), "matrix")
+if (taxa_are_rows(ps)) count_matrix <- t(count_matrix)
+count_matrix <- count_matrix[sample_names(ps), taxa_names(ps), drop = FALSE]
+
+sample_ids <- paste0("D", 0:8)
+control_id <- "Blank"
+asv_ids <- colnames(count_matrix)
+
+sample_metadata <- data.frame(sample_data(ps), check.names = FALSE) |>
+  tibble::rownames_to_column("SampleID") |>
+  mutate(
+    dilution_index = as.integer(sub("D", "", SampleID)),
+    input_cells = if_else(
+      SampleID == control_id,
+      0,
+      1.5e9 / 3^dilution_index
+    ),
+    dilution = factor(SampleID, levels = sample_ids)
+  )
+
+truth_table <- data.frame(
+  ASV = asv_ids,
+  truth = ifelse(asv_ids %in% mock_taxa, "Expected mock", "Contaminant"),
+  is_contaminant = !asv_ids %in% mock_taxa
+)
+
+count_long <- as.data.frame(as.table(count_matrix[sample_ids, , drop = FALSE])) |>
+  rename(SampleID = Var1, ASV = Var2, reads = Freq) |>
+  mutate(SampleID = as.character(SampleID), ASV = as.character(ASV)) |>
+  left_join(truth_table, by = "ASV") |>
+  left_join(
+    sample_metadata |> select(SampleID, DNA_conc, input_cells, dilution),
+    by = "SampleID"
+  )
+
+composition_summary <- count_long |>
+  group_by(SampleID, dilution, input_cells, truth) |>
+  summarise(reads = sum(reads), .groups = "drop") |>
+  group_by(SampleID) |>
+  mutate(relative_abundance = reads / sum(reads)) |>
+  ungroup()
+
+input_summary <- composition_summary |>
+  group_by(SampleID, dilution, input_cells) |>
+  summarise(
+    total_reads = sum(reads),
+    contaminant_read_pct = 100 * sum(relative_abundance[truth == "Contaminant"]),
+    .groups = "drop"
+  )
+
+write_csv(truth_table, file.path(output_dir, "07_01_gold_standard_ASVs.csv"))
+write_csv(input_summary, file.path(output_dir, "07_02_input_summary.csv"))
+knitr::kable(input_summary, digits = 3)
+```
+
+# 3. Three removal-intensity levels
+
+The three levels represent increasing removal intensity, not identical numeric
+parameters across tools. `decontam` uses its documented default threshold 0.1,
+then 0.5 and 0.9. MicrobIEM uses published ratio thresholds 1, 0.5, and 0.1;
+smaller ratios remove more features. SCRuB has no equivalent classification
+threshold, so its non-spatial model is fitted once and ASVs are classified using
+post-hoc sample-level removal-fraction cutoffs 0.5, 0.2, and 0.05.
+
+```{r parameter-map}
+parameter_map <- tibble::tribble(
+  ~method, ~intensity, ~parameter, ~value,
+  "Prevalence", "Default / reference", "decontam threshold", 0.1,
+  "Prevalence", "Intermediate", "decontam threshold", 0.5,
+  "Prevalence", "Aggressive", "decontam threshold", 0.9,
+  "Frequency", "Default / reference", "decontam threshold", 0.1,
+  "Frequency", "Intermediate", "decontam threshold", 0.5,
+  "Frequency", "Aggressive", "decontam threshold", 0.9,
+  "Combined", "Default / reference", "decontam threshold", 0.1,
+  "Combined", "Intermediate", "decontam threshold", 0.5,
+  "Combined", "Aggressive", "decontam threshold", 0.9,
+  "MicrobIEM", "Default / reference", "negative-control ratio", 1,
+  "MicrobIEM", "Intermediate", "negative-control ratio", 0.5,
+  "MicrobIEM", "Aggressive", "negative-control ratio", 0.1,
+  "SCRuB non-spatial", "Default / reference", "removal-fraction cutoff", 0.5,
+  "SCRuB non-spatial", "Intermediate", "removal-fraction cutoff", 0.2,
+  "SCRuB non-spatial", "Aggressive", "removal-fraction cutoff", 0.05
+) |>
+  mutate(
+    method = factor(method, levels = names(method_colors)),
+    intensity = factor(intensity, levels = intensity_levels)
+  )
+
+write_csv(parameter_map, file.path(output_dir, "07_03_parameter_map.csv"))
+knitr::kable(parameter_map)
+```
+
+# 4. Run decontamination methods
+
+All methods are fitted once to the complete dilution experiment. This matches
+the intended use case of selecting one analysis setting for one dataset. Mock
+samples are biological samples and `Blank` is the negative control.
+
+```{r run-decontam}
+prediction_parts <- list()
+prediction_index <- 0L
+
+for (method_code in c("prevalence", "frequency", "combined")) {
+  method_label <- recode(
+    method_code,
+    prevalence = "Prevalence",
+    frequency = "Frequency",
+    combined = "Combined"
+  )
+
+  method_settings <- parameter_map |>
+    filter(method == method_label)
+
+  for (setting_index in seq_len(nrow(method_settings))) {
+    setting <- method_settings[setting_index, ]
+    arguments <- list(
+      seqtab = ps,
+      method = method_code,
+      threshold = setting$value
+    )
+    if (method_code %in% c("prevalence", "combined")) {
+      arguments$neg <- "is.neg"
+    }
+    if (method_code %in% c("frequency", "combined")) {
+      arguments$conc <- "DNA_conc"
+    }
+
+    fit <- do.call(decontam::isContaminant, arguments)
+    feature_flags <- data.frame(
+      ASV = rownames(fit),
+      predicted_contaminant = fit$contaminant %in% TRUE
+    )
+
+    prediction_index <- prediction_index + 1L
+    prediction_parts[[prediction_index]] <- tidyr::crossing(
+      SampleID = sample_ids,
+      ASV = asv_ids
+    ) |>
+      left_join(feature_flags, by = "ASV") |>
+      mutate(
+        predicted_contaminant = replace_na(predicted_contaminant, FALSE),
+        method = method_label,
+        intensity = as.character(setting$intensity),
+        parameter = as.character(setting$parameter),
+        parameter_value = setting$value
+      )
+  }
+}
+```
+
+```{r run-microbiem}
+microbiem_settings <- parameter_map |>
+  filter(method == "MicrobIEM")
+
+for (setting_index in seq_len(nrow(microbiem_settings))) {
+  setting <- microbiem_settings[setting_index, ]
+  fit <- MicrobIEM_decontamination(
+    feature_table = data.frame(t(count_matrix), check.names = FALSE),
+    SAMPLE = sample_ids,
+    NEG1 = control_id,
+    ratio_NEG1_threshold = setting$value,
+    ratio_NEG2_threshold = NA_real_,
+    span_NEG1_threshold = NA_real_,
+    span_NEG2_threshold = NA_real_
+  )
+
+  feature_flags <- data.frame(
+    ASV = rownames(fit),
+    predicted_contaminant = fit$is_contaminant %in% TRUE
+  )
+
+  prediction_index <- prediction_index + 1L
+  prediction_parts[[prediction_index]] <- tidyr::crossing(
+    SampleID = sample_ids,
+    ASV = asv_ids
+  ) |>
+    left_join(feature_flags, by = "ASV") |>
+    mutate(
+      predicted_contaminant = replace_na(predicted_contaminant, FALSE),
+      method = "MicrobIEM",
+      intensity = as.character(setting$intensity),
+      parameter = as.character(setting$parameter),
+      parameter_value = setting$value
+    )
+}
+```
+
+```{r run-scrub}
+scrub_metadata <- data.frame(
+  is_control = rownames(count_matrix) == control_id,
+  control_type = ifelse(rownames(count_matrix) == control_id, "Blank", "Sample"),
+  row.names = rownames(count_matrix)
+)
+
+scrub_fit <- SCRuB::SCRuB(
+  input_data = count_matrix,
+  metadata = scrub_metadata,
+  control_order = "Blank",
+  verbose = FALSE
+)
+
+scrub_clean <- scrub_fit$decontaminated_samples[sample_ids, asv_ids, drop = FALSE]
+scrub_original <- count_matrix[sample_ids, asv_ids, drop = FALSE]
+scrub_removal_fraction <- matrix(
+  0,
+  nrow = length(sample_ids),
+  ncol = length(asv_ids),
+  dimnames = list(sample_ids, asv_ids)
+)
+present_entries <- scrub_original > 0
+scrub_removal_fraction[present_entries] <- pmax(
+  scrub_original[present_entries] - scrub_clean[present_entries],
+  0
+) / scrub_original[present_entries]
+
+scrub_settings <- parameter_map |>
+  filter(method == "SCRuB non-spatial")
+
+for (setting_index in seq_len(nrow(scrub_settings))) {
+  setting <- scrub_settings[setting_index, ]
+  prediction_index <- prediction_index + 1L
+  prediction_parts[[prediction_index]] <- as.data.frame(
+    as.table(scrub_removal_fraction >= setting$value)
+  ) |>
+    rename(SampleID = Var1, ASV = Var2, predicted_contaminant = Freq) |>
+    mutate(
+      SampleID = as.character(SampleID),
+      ASV = as.character(ASV),
+      method = "SCRuB non-spatial",
+      intensity = as.character(setting$intensity),
+      parameter = as.character(setting$parameter),
+      parameter_value = setting$value
+    )
+}
+
+predictions <- bind_rows(prediction_parts) |>
+  mutate(
+    method = factor(method, levels = names(method_colors)),
+    intensity = factor(intensity, levels = intensity_levels)
+  )
+```
+
+# 5. Read-weighted benchmark metrics
+
+```{r metrics}
+benchmark_units <- predictions |>
+  inner_join(
+    count_long |>
+      select(SampleID, ASV, reads, truth, is_contaminant, input_cells, dilution),
+    by = c("SampleID", "ASV")
+  )
+
+benchmark_metrics <- benchmark_units |>
+  group_by(
+    SampleID, dilution, input_cells,
+    method, intensity, parameter, parameter_value
+  ) |>
+  summarise(
+    TP = sum(reads[predicted_contaminant & is_contaminant]),
+    TN = sum(reads[!predicted_contaminant & !is_contaminant]),
+    FP = sum(reads[predicted_contaminant & !is_contaminant]),
+    FN = sum(reads[!predicted_contaminant & is_contaminant]),
+    n_flagged_ASVs = sum(predicted_contaminant),
+    .groups = "drop"
+  ) |>
+  mutate(
+    Sensitivity_Recall = TP / (TP + FN),
+    Specificity = TN / (TN + FP),
+    Precision_PPV = if_else(TP + FP > 0, TP / (TP + FP), 0),
+    F1 = if_else(
+      Precision_PPV + Sensitivity_Recall > 0,
+      2 * Precision_PPV * Sensitivity_Recall /
+        (Precision_PPV + Sensitivity_Recall),
+      0
+    ),
+    Youden_J = Sensitivity_Recall + Specificity - 1,
+    contaminant_reads_removed_pct = 100 * Sensitivity_Recall,
+    expected_reads_retained_pct = 100 * Specificity,
+    total_reads_removed_pct = 100 * (TP + FP) / (TP + TN + FP + FN)
+  )
+
+published_focus <- c("D2", "D4", "D6", "D8")
+focus_summary <- benchmark_metrics |>
+  filter(SampleID %in% published_focus) |>
+  group_by(method, intensity, parameter, parameter_value) |>
+  summarise(
+    mean_Sensitivity_Recall = mean(Sensitivity_Recall),
+    mean_Specificity = mean(Specificity),
+    mean_Precision_PPV = mean(Precision_PPV),
+    mean_F1 = mean(F1),
+    mean_Youden_J = mean(Youden_J),
+    mean_total_reads_removed_pct = mean(total_reads_removed_pct),
+    .groups = "drop"
+  ) |>
+  arrange(intensity, desc(mean_Youden_J))
+
+write_csv(benchmark_metrics, file.path(output_dir, "07_04_sample_metrics.csv"))
+write_csv(focus_summary, file.path(output_dir, "07_05_D2_D4_D6_D8_summary.csv"))
+
+knitr::kable(focus_summary, digits = 3)
+```
+
+# 6. Figure 1: mock benchmark and method differences
+
+```{r figure-1, fig.width=16, fig.height=12}
+composition_plot <- composition_summary |>
+  mutate(
+    truth = factor(truth, levels = c("Expected mock", "Contaminant")),
+    dilution = factor(SampleID, levels = sample_ids)
+  ) |>
+  ggplot(aes(dilution, relative_abundance, fill = truth)) +
+  geom_col(width = 0.8) +
+  scale_fill_manual(values = c("Expected mock" = "#0072B2", "Contaminant" = "#D55E00")) +
+  scale_y_continuous(labels = scales::label_percent(), expand = c(0, 0)) +
+  labs(
+    x = "Three-fold dilution",
+    y = "Read relative abundance",
+    fill = NULL,
+    title = "Observed composition across the Karstens dilution series"
+  ) +
+  theme(legend.position = "bottom")
+
+youden_plot <- benchmark_metrics |>
+  ggplot(aes(dilution, Youden_J, color = method, group = method)) +
+  geom_hline(yintercept = 0, color = "grey60", linetype = 2) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2) +
+  facet_wrap(~intensity, nrow = 1) +
+  scale_color_manual(values = method_colors) +
+  scale_y_continuous(limits = c(-1, 1)) +
+  labs(
+    x = "Three-fold dilution",
+    y = "Youden J",
+    color = NULL,
+    title = "Classification performance changes with method and removal intensity"
+  ) +
+  theme(legend.position = "bottom")
+
+tradeoff_plot <- focus_summary |>
+  ggplot(aes(mean_Specificity, mean_Sensitivity_Recall, color = method)) +
+  geom_point(size = 3) +
+  facet_wrap(~intensity, nrow = 1) +
+  scale_color_manual(values = method_colors) +
+  scale_x_continuous(limits = c(0, 1)) +
+  scale_y_continuous(limits = c(0, 1)) +
+  labs(
+    x = "Expected-read retention (specificity)",
+    y = "Contaminant-read removal (sensitivity)",
+    color = NULL,
+    title = "Removal–retention trade-off in D2, D4, D6, and D8"
+  ) +
+  theme(legend.position = "bottom")
+
+figure_1 <- composition_plot /
+  (youden_plot / tradeoff_plot) +
+  patchwork::plot_annotation(
+    title = "Figure 1. Actual-mock benchmarking reveals method- and threshold-dependent performance",
+    tag_levels = "A"
+  )
+
+print(figure_1)
+ggsave(
+  file.path(output_dir, "07_Figure1_Karstens_mock_benchmark.png"),
+  figure_1, width = 16, height = 12, dpi = 300
+)
+ggsave(
+  file.path(output_dir, "07_Figure1_Karstens_mock_benchmark.pdf"),
+  figure_1, width = 16, height = 12
+)
+```
+
+# 7. Method-by-intensity comparison
+
+```{r comparison-heatmap, fig.width=11, fig.height=6}
+comparison_plot_data <- focus_summary |>
+  mutate(
+    label = sprintf("%.2f", mean_Youden_J),
+    method = factor(method, levels = rev(names(method_colors)))
+  )
+
+p_comparison <- ggplot(
+  comparison_plot_data,
+  aes(intensity, method, fill = mean_Youden_J)
+) +
+  geom_tile(color = "white", linewidth = 0.7) +
+  geom_text(aes(label = label), size = 4) +
+  scale_fill_gradient2(
+    low = "#2166AC", mid = "white", high = "#B2182B",
+    midpoint = 0, limits = c(-1, 1)
+  ) +
+  labs(
+    x = NULL, y = NULL, fill = "Mean Youden J",
+    title = "No single removal intensity is optimal for every method",
+    subtitle = "Mean over the published focus dilutions D2, D4, D6, and D8"
+  )
+
+print(p_comparison)
+ggsave(
+  file.path(output_dir, "07_method_intensity_Youden_heatmap.png"),
+  p_comparison, width = 11, height = 6, dpi = 300
+)
+```
+
+# 8. Verification and interpretation boundary
+
+```{r verification}
+verification <- data.frame(
+  check = c(
+    "Official dataset contains 10 samples and 1414 ASVs",
+    "Gold standard contains 9 expected and 1405 contaminant ASVs",
+    "Five methods and three intensity levels completed",
+    "Every method-intensity combination produced all nine dilution results",
+    "Confusion matrices recover every original sample read",
+    "All reported metrics are within their valid ranges"
+  ),
+  passed = c(
+    nsamples(ps) == 10L & ntaxa(ps) == 1414L,
+    sum(!truth_table$is_contaminant) == 9L & sum(truth_table$is_contaminant) == 1405L,
+    n_distinct(benchmark_metrics$method) == 5L &
+      n_distinct(benchmark_metrics$intensity) == 3L,
+    nrow(benchmark_metrics) == 5L * 3L * 9L,
+    all(
+      benchmark_metrics$TP + benchmark_metrics$TN +
+        benchmark_metrics$FP + benchmark_metrics$FN ==
+        rowSums(count_matrix[as.character(benchmark_metrics$SampleID), , drop = FALSE])
+    ),
+    all(benchmark_metrics$Sensitivity_Recall >= 0 & benchmark_metrics$Sensitivity_Recall <= 1) &
+      all(benchmark_metrics$Specificity >= 0 & benchmark_metrics$Specificity <= 1) &
+      all(benchmark_metrics$Precision_PPV >= 0 & benchmark_metrics$Precision_PPV <= 1) &
+      all(benchmark_metrics$F1 >= 0 & benchmark_metrics$F1 <= 1) &
+      all(benchmark_metrics$Youden_J >= -1 & benchmark_metrics$Youden_J <= 1)
+  )
+)
+
+write_csv(verification, file.path(output_dir, "07_06_verification.csv"))
+knitr::kable(verification)
+if (!all(verification$passed)) stop("One or more benchmark checks failed.")
+```
+
+This even mock is a controlled benchmark, not a universal threshold selector.
+It tests preservation of nine known ASVs under a biomass gradient. A threshold
+that performs well here may still remove genuine inhabitants in a real skin or
+other low-biomass dataset. The next validation layer should therefore combine
+negative-control enrichment with explicit retention of literature-supported
+commensal genera before a threshold is accepted for biological analysis.
+
+```{r session-info}
+sessionInfo()
+```

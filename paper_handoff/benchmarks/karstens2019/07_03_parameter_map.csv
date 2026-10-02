@@ -1,0 +1,16 @@
+method,intensity,parameter,value
+Prevalence,Default / reference,decontam threshold,0.1
+Prevalence,Intermediate,decontam threshold,0.5
+Prevalence,Aggressive,decontam threshold,0.9
+Frequency,Default / reference,decontam threshold,0.1
+Frequency,Intermediate,decontam threshold,0.5
+Frequency,Aggressive,decontam threshold,0.9
+Combined,Default / reference,decontam threshold,0.1
+Combined,Intermediate,decontam threshold,0.5
+Combined,Aggressive,decontam threshold,0.9
+MicrobIEM,Default / reference,negative-control ratio,1
+MicrobIEM,Intermediate,negative-control ratio,0.5
+MicrobIEM,Aggressive,negative-control ratio,0.1
+SCRuB non-spatial,Default / reference,removal-fraction cutoff,0.5
+SCRuB non-spatial,Intermediate,removal-fraction cutoff,0.2
+SCRuB non-spatial,Aggressive,removal-fraction cutoff,0.05

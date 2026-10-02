@@ -1,0 +1,7 @@
+check,passed
+Three Cell Mock samples and one DNA Mock were included,TRUE
+Both expected and off-target ASVs occur in each mock type,TRUE
+All five methods produced threshold results,TRUE
+All five methods produced AUROC for both mock types,TRUE
+Every confusion matrix contains every observed mock ASV-sample unit,TRUE
+All metrics are within their valid ranges,TRUE

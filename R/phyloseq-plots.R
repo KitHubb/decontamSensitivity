@@ -224,11 +224,19 @@ plot_taxa_reads_before_after <- function(ps,
   filtered <- filter_phyloseq_at_threshold(ps, result, threshold)
 
   melt_taxa <- function(object, state) {
-    glommed <- phyloseq::tax_glom(object, taxrank = taxonomy, NArm = FALSE)
-    out <- phyloseq::psmelt(glommed)
-    out$taxon <- as.character(out[[taxonomy]])
+    glommed <- speedyseq::tax_glom(object, taxrank = taxonomy, NArm = FALSE)
+    abundance <- as(phyloseq::otu_table(glommed), "matrix")
+    if (!phyloseq::taxa_are_rows(glommed)) abundance <- t(abundance)
+    taxon <- as.character(phyloseq::tax_table(glommed)[, taxonomy])
+    out <- data.frame(
+      Sample = rep(colnames(abundance), each = nrow(abundance)),
+      Abundance = as.vector(abundance),
+      taxon = rep(taxon, times = ncol(abundance)),
+      state = state,
+      stringsAsFactors = FALSE
+    )
+    out <- out[out$Abundance > 0, , drop = FALSE]
     out$taxon[is.na(out$taxon) | !nzchar(out$taxon)] <- "Unclassified"
-    out$state <- state
     out
   }
   before_label <- "Before decontam"

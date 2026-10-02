@@ -18,3 +18,5 @@ renv.lock
 /_paper/
 /Analysis_R/data-raw/
 /Analysis_R/results/
+.codex_tmp/
+/tmp/

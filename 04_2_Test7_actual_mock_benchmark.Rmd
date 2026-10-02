@@ -1,0 +1,556 @@
+---
+title: "04_2 Test7 actual mock benchmark"
+author: "Test7 decontamination analysis"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: bootstrap
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, message = FALSE, warning = FALSE,
+  fig.align = "center", fig.width = 11, fig.height = 6.5, dpi = 180
+)
+options(stringsAsFactors = FALSE)
+```
+
+# 1. Scope
+
+This benchmark uses the observed Test7 mock samples directly. The three Cell
+Mock samples and the DNA Mock are not simulated. An observed ASV assigned to
+one of the six MSA-2005 target genera is treated as expected; any other observed
+ASV is treated as off-target. Thus, the labels are operational taxonomic truth,
+not proof of the physical contamination source.
+
+The contaminant calls are the pooled results already generated in script 06.
+Mocks were excluded when those methods were fitted, and the resulting calls are
+applied here to the mock samples as an external validation set.
+
+```{r packages-paths}
+library(phyloseq)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(readr)
+library(pROC)
+
+input_path <- file.path("Phyloseq", "phy_F270R210_260921.rds")
+method_dir <- file.path(
+  "Results", "Test7", "06_combined_cross_method_validation"
+)
+output_dir <- file.path(
+  "Results", "Test7", "04_2_actual_mock_benchmark"
+)
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+
+decontam_flag_path <- file.path(method_dir, "06_05_decontam_feature_flags.csv")
+microbiem_flag_path <- file.path(
+  method_dir, "06_15_MicrobIEM_threshold_feature_flags.csv"
+)
+scrub_flag_path <- file.path(
+  method_dir, "06_17_SCRuB_nonspatial_threshold_feature_flags.csv"
+)
+
+stopifnot(
+  file.exists(input_path),
+  file.exists(decontam_flag_path),
+  file.exists(microbiem_flag_path),
+  file.exists(scrub_flag_path)
+)
+
+method_colors <- c(
+  Prevalence = "#1B9E77",
+  Frequency = "#D95F02",
+  Combined = "#7570B3",
+  MicrobIEM = "#66A61E",
+  `SCRuB non-spatial` = "#E7298A"
+)
+theme_set(theme_bw(base_size = 11))
+```
+
+# 2. Actual mock samples and ASV truth
+
+```{r actual-mock-truth}
+expected_genera <- c(
+  "Acinetobacter", "Corynebacterium", "Micrococcus",
+  "Cutibacterium", "Staphylococcus", "Streptococcus"
+)
+
+expected_table <- data.frame(
+  Genus = expected_genera,
+  expected_abundance = rep(1 / length(expected_genera), length(expected_genera))
+)
+
+phy <- readRDS(input_path)
+metadata <- data.frame(sample_data(phy), check.names = FALSE) |>
+  tibble::rownames_to_column("SampleID") |>
+  mutate(Cycle = sub("\\.0$", "", as.character(Cycle)))
+
+cell_mock_ids <- metadata |>
+  filter(!is.na(control_type), control_type == "Cell_mix", Cycle == "3") |>
+  pull(SampleID)
+dna_mock_ids <- metadata |>
+  filter(!is.na(control_type), control_type == "DNA_mix") |>
+  pull(SampleID)
+mock_ids <- c(cell_mock_ids, dna_mock_ids)
+
+count_table <- as(otu_table(phy), "matrix")
+if (taxa_are_rows(phy)) count_table <- t(count_table)
+count_table <- count_table[sample_names(phy), taxa_names(phy), drop = FALSE]
+
+taxonomy <- data.frame(tax_table(phy), check.names = FALSE) |>
+  tibble::rownames_to_column("ASV") |>
+  mutate(
+    Genus = if_else(is.na(Genus) | Genus == "", "Unclassified", as.character(Genus))
+  )
+
+mock_truth <- as.data.frame(as.table(count_table[mock_ids, , drop = FALSE])) |>
+  rename(SampleID = Var1, ASV = Var2, reads = Freq) |>
+  mutate(SampleID = as.character(SampleID), ASV = as.character(ASV)) |>
+  filter(reads > 0) |>
+  left_join(
+    metadata |> select(SampleID, Subject, control_type),
+    by = "SampleID"
+  ) |>
+  left_join(taxonomy, by = "ASV") |>
+  mutate(
+    mock_type = if_else(control_type == "Cell_mix", "Cell Mock", "DNA Mock"),
+    truth = if_else(Genus %in% expected_genera, "Expected", "Off-target"),
+    is_off_target = truth == "Off-target"
+  )
+
+mock_truth_summary <- mock_truth |>
+  group_by(mock_type, SampleID, Subject) |>
+  summarise(
+    total_reads = sum(reads),
+    observed_ASVs = n(),
+    expected_ASVs = sum(!is_off_target),
+    off_target_ASVs = sum(is_off_target),
+    off_target_read_pct = 100 * sum(reads[is_off_target]) / sum(reads),
+    .groups = "drop"
+  )
+
+write_csv(expected_table, file.path(output_dir, "04_2_01_expected_genera.csv"))
+write_csv(mock_truth, file.path(output_dir, "04_2_02_actual_mock_ASV_truth.csv"))
+write_csv(mock_truth_summary, file.path(output_dir, "04_2_03_actual_mock_summary.csv"))
+
+knitr::kable(mock_truth_summary, digits = 3)
+```
+
+# 3. Existing five-method calls
+
+No method is refitted in this document. It uses the feature-level calls from
+script 06 so that all methods use the same Test7 input and negative controls.
+For MicrobIEM, the no-well-position setting (`Any detected`) is used. For
+SCRuB, the non-spatial result is used.
+
+```{r assemble-predictions}
+mock_asvs <- unique(mock_truth$ASV)
+
+decontam_flags <- read_csv(decontam_flag_path, show_col_types = FALSE) |>
+  filter(batch_mode == "pooled") |>
+  transmute(
+    method = recode(
+      method,
+      prevalence = "Prevalence",
+      frequency = "Frequency",
+      combined = "Combined"
+    ),
+    threshold_parameter = "decontam threshold",
+    threshold = as.numeric(threshold),
+    ASV = feature_id,
+    predicted_contaminant = contaminant
+  )
+
+decontam_settings <- decontam_flags |>
+  distinct(method, threshold_parameter, threshold)
+
+decontam_predictions <- tidyr::crossing(
+  decontam_settings,
+  ASV = mock_asvs
+) |>
+  left_join(
+    decontam_flags,
+    by = c("method", "threshold_parameter", "threshold", "ASV")
+  ) |>
+  mutate(predicted_contaminant = replace_na(predicted_contaminant, FALSE))
+
+microbiem_flags <- read_csv(microbiem_flag_path, show_col_types = FALSE) |>
+  filter(span_label == "Any detected") |>
+  transmute(
+    method = "MicrobIEM",
+    threshold_parameter = "ratio threshold",
+    threshold = as.numeric(ratio_threshold),
+    ASV,
+    predicted_contaminant = contaminant
+  )
+
+microbiem_settings <- microbiem_flags |>
+  distinct(method, threshold_parameter, threshold)
+
+microbiem_predictions <- tidyr::crossing(
+  microbiem_settings,
+  ASV = mock_asvs
+) |>
+  left_join(
+    microbiem_flags,
+    by = c("method", "threshold_parameter", "threshold", "ASV")
+  ) |>
+  mutate(predicted_contaminant = replace_na(predicted_contaminant, FALSE))
+
+scrub_flags <- read_csv(scrub_flag_path, show_col_types = FALSE) |>
+  transmute(
+    method = "SCRuB non-spatial",
+    threshold_parameter = "ASV removal-fraction cutoff",
+    threshold = as.numeric(removal_fraction_cutoff),
+    ASV,
+    predicted_contaminant = affected
+  )
+
+scrub_settings <- scrub_flags |>
+  distinct(method, threshold_parameter, threshold)
+
+scrub_predictions <- tidyr::crossing(
+  scrub_settings,
+  ASV = mock_asvs
+) |>
+  left_join(
+    scrub_flags,
+    by = c("method", "threshold_parameter", "threshold", "ASV")
+  ) |>
+  mutate(predicted_contaminant = replace_na(predicted_contaminant, FALSE))
+
+predictions <- bind_rows(
+  decontam_predictions,
+  microbiem_predictions,
+  scrub_predictions
+)
+```
+
+# 4. Classification metrics on actual mocks
+
+The evaluation unit is an observed ASV-sample pair. Consequently, an ASV
+observed in all three Cell Mock samples contributes three observations, whereas
+an ASV observed only once contributes one.
+
+```{r classification-metrics}
+prediction_units <- predictions |>
+  inner_join(
+    mock_truth |>
+      select(SampleID, Subject, mock_type, ASV, reads, Genus, truth, is_off_target),
+    by = "ASV"
+  )
+
+threshold_metrics <- prediction_units |>
+  group_by(mock_type, method, threshold_parameter, threshold) |>
+  summarise(
+    TP = sum(predicted_contaminant & is_off_target),
+    TN = sum(!predicted_contaminant & !is_off_target),
+    FP = sum(predicted_contaminant & !is_off_target),
+    FN = sum(!predicted_contaminant & is_off_target),
+    off_target_reads_removed_pct = 100 *
+      sum(reads[predicted_contaminant & is_off_target]) /
+      sum(reads[is_off_target]),
+    expected_reads_removed_pct = 100 *
+      sum(reads[predicted_contaminant & !is_off_target]) /
+      sum(reads[!is_off_target]),
+    .groups = "drop"
+  ) |>
+  mutate(
+    Sensitivity_Recall = TP / (TP + FN),
+    Specificity = TN / (TN + FP),
+    Precision_PPV = if_else(TP + FP > 0, TP / (TP + FP), NA_real_),
+    F1 = if_else(
+      is.finite(Precision_PPV) & Precision_PPV + Sensitivity_Recall > 0,
+      2 * Precision_PPV * Sensitivity_Recall /
+        (Precision_PPV + Sensitivity_Recall),
+      0
+    ),
+    Youden_J = Sensitivity_Recall + Specificity - 1
+  )
+
+raw_metrics <- mock_truth |>
+  group_by(mock_type) |>
+  summarise(
+    method = "Raw: no ASV removed",
+    TP = 0L,
+    TN = sum(!is_off_target),
+    FP = 0L,
+    FN = sum(is_off_target),
+    Sensitivity_Recall = 0,
+    Specificity = 1,
+    Precision_PPV = NA_real_,
+    F1 = 0,
+    Youden_J = 0,
+    .groups = "drop"
+  )
+
+write_csv(threshold_metrics, file.path(output_dir, "04_2_04_threshold_metrics.csv"))
+write_csv(raw_metrics, file.path(output_dir, "04_2_05_raw_classification_metrics.csv"))
+```
+
+# 5. Threshold-free AUROC
+
+Continuous scores are reconstructed from each method's saved threshold
+trajectory. ASVs absent from a method's fitted feature table receive score 0
+because the fitted method cannot flag them.
+
+```{r auc}
+decontam_scores <- decontam_predictions |>
+  group_by(method, ASV) |>
+  summarise(
+    score = if_else(
+      any(predicted_contaminant),
+      1 - min(threshold[predicted_contaminant]),
+      0
+    ),
+    .groups = "drop"
+  )
+
+microbiem_scores <- microbiem_predictions |>
+  group_by(method, ASV) |>
+  summarise(
+    score = if_else(
+      any(predicted_contaminant),
+      max(threshold[predicted_contaminant]),
+      0
+    ),
+    .groups = "drop"
+  )
+
+scrub_scores <- scrub_predictions |>
+  group_by(method, ASV) |>
+  summarise(
+    score = if_else(
+      any(predicted_contaminant),
+      max(threshold[predicted_contaminant]),
+      0
+    ),
+    .groups = "drop"
+  )
+
+score_units <- bind_rows(decontam_scores, microbiem_scores, scrub_scores) |>
+  inner_join(
+    mock_truth |> select(SampleID, mock_type, ASV, is_off_target),
+    by = "ASV"
+  )
+
+auc_parts <- list()
+roc_parts <- list()
+part_index <- 0L
+
+for (mock_name in c("Cell Mock", "DNA Mock")) {
+  for (method_name in names(method_colors)) {
+    score_data <- score_units |>
+      filter(mock_type == mock_name, method == method_name)
+
+    roc_fit <- pROC::roc(
+      response = score_data$is_off_target,
+      predictor = score_data$score,
+      levels = c(FALSE, TRUE),
+      direction = "<",
+      quiet = TRUE
+    )
+
+    part_index <- part_index + 1L
+    auc_parts[[part_index]] <- data.frame(
+      mock_type = mock_name,
+      method = method_name,
+      AUROC = as.numeric(pROC::auc(roc_fit))
+    )
+
+    roc_coordinates <- data.frame(pROC::coords(
+      roc_fit,
+      x = "all",
+      ret = c("specificity", "sensitivity"),
+      transpose = FALSE
+    )) |>
+      mutate(
+        mock_type = mock_name,
+        method = method_name,
+        false_positive_rate = 1 - specificity
+      )
+    roc_parts[[part_index]] <- roc_coordinates
+  }
+}
+
+auc_summary <- bind_rows(auc_parts)
+roc_data <- bind_rows(roc_parts)
+
+best_metrics <- threshold_metrics |>
+  group_by(mock_type, method) |>
+  arrange(desc(Youden_J), desc(F1), threshold, .by_group = TRUE) |>
+  slice_head(n = 1) |>
+  ungroup() |>
+  left_join(auc_summary, by = c("mock_type", "method")) |>
+  mutate(
+    mock_type = factor(mock_type, levels = c("Cell Mock", "DNA Mock")),
+    method = factor(method, levels = names(method_colors))
+  ) |>
+  arrange(mock_type, method)
+
+write_csv(auc_summary, file.path(output_dir, "04_2_06_AUROC.csv"))
+write_csv(best_metrics, file.path(output_dir, "04_2_07_best_Youden_summary.csv"))
+write_csv(roc_data, file.path(output_dir, "04_2_08_ROC_coordinates.csv"))
+
+knitr::kable(
+  best_metrics |>
+    select(
+      mock_type, method, threshold_parameter, threshold,
+      TP, TN, FP, FN, Sensitivity_Recall, Specificity,
+      Precision_PPV, F1, Youden_J, AUROC,
+      off_target_reads_removed_pct, expected_reads_removed_pct
+    ),
+  digits = 3
+)
+```
+
+# 6. Figures
+
+```{r metric-plot, fig.width=13, fig.height=9}
+metric_plot_data <- best_metrics |>
+  select(
+    mock_type, method,
+    Sensitivity_Recall, Specificity, Precision_PPV, F1, Youden_J, AUROC
+  ) |>
+  pivot_longer(
+    cols = c(
+      Sensitivity_Recall, Specificity, Precision_PPV, F1, Youden_J, AUROC
+    ),
+    names_to = "metric",
+    values_to = "value"
+  ) |>
+  mutate(
+    metric = recode(
+      metric,
+      Sensitivity_Recall = "Sensitivity / Recall",
+      Precision_PPV = "Precision / PPV",
+      Youden_J = "Youden J"
+    ),
+    metric = factor(
+      metric,
+      levels = c(
+        "Sensitivity / Recall", "Specificity", "Precision / PPV",
+        "F1", "Youden J", "AUROC"
+      )
+    )
+  )
+
+p_metrics <- ggplot(
+  metric_plot_data,
+  aes(method, value, color = method)
+) +
+  geom_point(size = 2.7) +
+  facet_grid(metric ~ mock_type) +
+  scale_color_manual(values = method_colors) +
+  scale_y_continuous(limits = c(0, 1)) +
+  labs(
+    title = "Five-method performance on actual Test7 mocks",
+    subtitle = "Threshold-dependent metrics use maximum Youden J; AUROC is threshold-free",
+    x = NULL, y = "Metric value", color = NULL
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+    legend.position = "bottom"
+  )
+
+print(p_metrics)
+ggsave(
+  file.path(output_dir, "04_2_01_actual_mock_metrics.png"),
+  p_metrics, width = 13, height = 9, dpi = 300
+)
+```
+
+```{r roc-plot, fig.width=12, fig.height=5.5}
+roc_plot_data <- roc_data |>
+  mutate(
+    mock_type = factor(mock_type, levels = c("Cell Mock", "DNA Mock")),
+    method = factor(method, levels = names(method_colors))
+  )
+
+p_roc <- ggplot(
+  roc_plot_data,
+  aes(false_positive_rate, sensitivity, color = method, linetype = method)
+) +
+  geom_abline(slope = 1, intercept = 0, linetype = 2, color = "grey65") +
+  geom_path(linewidth = 0.9) +
+  facet_wrap(~mock_type, nrow = 1) +
+  scale_color_manual(values = method_colors) +
+  coord_equal() +
+  labs(
+    title = "Actual-mock ASV classification ROC curves",
+    x = "False-positive rate (1 - specificity)",
+    y = "Sensitivity",
+    color = NULL,
+    linetype = NULL
+  ) +
+  theme(legend.position = "bottom")
+
+print(p_roc)
+ggsave(
+  file.path(output_dir, "04_2_02_actual_mock_ROC.png"),
+  p_roc, width = 12, height = 5.5, dpi = 300
+)
+```
+
+# 7. Verification and interpretation boundary
+
+```{r verification}
+mock_unit_counts <- mock_truth |>
+  count(mock_type, name = "expected_units")
+
+metric_unit_check <- threshold_metrics |>
+  mutate(observed_units = TP + TN + FP + FN) |>
+  left_join(mock_unit_counts, by = "mock_type")
+
+verification <- data.frame(
+  check = c(
+    "Three Cell Mock samples and one DNA Mock were included",
+    "Both expected and off-target ASVs occur in each mock type",
+    "All five methods produced threshold results",
+    "All five methods produced AUROC for both mock types",
+    "Every confusion matrix contains every observed mock ASV-sample unit",
+    "All metrics are within their valid ranges"
+  ),
+  passed = c(
+    length(cell_mock_ids) == 3L & length(dna_mock_ids) == 1L,
+    all((mock_truth |> count(mock_type, truth) |> count(mock_type))$n == 2L),
+    setequal(unique(threshold_metrics$method), names(method_colors)),
+    nrow(auc_summary) == 10L & all(is.finite(auc_summary$AUROC)),
+    all(metric_unit_check$observed_units == metric_unit_check$expected_units),
+    all(is.na(threshold_metrics$Sensitivity_Recall) |
+          threshold_metrics$Sensitivity_Recall >= 0 &
+          threshold_metrics$Sensitivity_Recall <= 1) &
+      all(is.na(threshold_metrics$Specificity) |
+            threshold_metrics$Specificity >= 0 &
+            threshold_metrics$Specificity <= 1) &
+      all(is.na(threshold_metrics$Precision_PPV) |
+            threshold_metrics$Precision_PPV >= 0 &
+            threshold_metrics$Precision_PPV <= 1) &
+      all(is.na(threshold_metrics$F1) |
+            threshold_metrics$F1 >= 0 & threshold_metrics$F1 <= 1) &
+      all(threshold_metrics$Youden_J >= -1 & threshold_metrics$Youden_J <= 1) &
+      all(auc_summary$AUROC >= 0 & auc_summary$AUROC <= 1)
+  )
+)
+
+write_csv(verification, file.path(output_dir, "04_2_09_verification.csv"))
+knitr::kable(verification)
+if (!all(verification$passed)) stop("One or more actual-mock checks failed.")
+```
+
+Sensitivity here means removal of observed off-target ASVs. Specificity means
+retention of observed ASVs assigned to the six expected genera. A flagged ASV
+within an expected genus is counted as a false positive even if that particular
+ASV is not the intended strain, which is a conservative genus-level definition.
+The DNA Mock contains one sample, so its uncertainty must not be interpreted as
+equivalent to replicated validation.
+
+```{r session-info}
+sessionInfo()
+```

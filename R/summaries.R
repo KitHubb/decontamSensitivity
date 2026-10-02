@@ -131,6 +131,8 @@ summarize_flagged_taxa <- function(result, threshold, taxonomy = "Genus") {
     reads_control = fs$reads_control[rows],
     stringsAsFactors = FALSE
   )
+  total_biological_reads <- sum(result$counts[, !result$is_control, drop = FALSE])
+  total_control_reads <- sum(result$counts[, result$is_control, drop = FALSE])
   pieces <- split(x, x$taxon, drop = TRUE)
   out <- do.call(rbind, lapply(pieces, function(z) {
     data.frame(
@@ -138,11 +140,11 @@ summarize_flagged_taxa <- function(result, threshold, taxonomy = "Genus") {
       flagged_features = nrow(z),
       reads_biological = sum(z$reads_biological),
       relative_abundance_biological_pct = .safe_percent(
-        sum(z$reads_biological), sum(result$counts[, !result$is_control, drop = FALSE])
+        sum(z$reads_biological), total_biological_reads
       ),
       reads_control = sum(z$reads_control),
       relative_abundance_control_pct = .safe_percent(
-        sum(z$reads_control), sum(result$counts[, result$is_control, drop = FALSE])
+        sum(z$reads_control), total_control_reads
       ),
       stringsAsFactors = FALSE
     )

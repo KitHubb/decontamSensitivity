@@ -1,0 +1,5 @@
+mock_type,SampleID,Subject,total_reads,observed_ASVs,expected_ASVs,off_target_ASVs,off_target_read_pct
+Cell Mock,70_S70_L001,Cell-Mock,41382,126,9,117,10.980619593059785
+Cell Mock,71_S71_L001,Cell-Mock-1,48361,85,8,77,3.4325179380078987
+Cell Mock,72_S72_L001,Cell-Mock-2,39637,104,10,94,6.380402149506774
+DNA Mock,73_S73_L001,DNA-Mock,52189,95,8,87,7.470922991434977
